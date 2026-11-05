@@ -162,10 +162,6 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  List<Stock> get _films => _stocks.where((stock) => stock.isFilm).toList();
-
-  List<Stock> get _printStocks =>
-      _stocks.where((stock) => stock.isPrintStock).toList();
 
   String _stockName(String id) {
     for (final stock in _stocks) {
@@ -322,8 +318,44 @@ class _EditorPageState extends State<EditorPage> {
           _busy = false;
           _busyLabel = null;
         });
+        // The frame's shape changed, so the cached "before" no longer lines up
+        // with it; the strength composite needs a fresh one.
+        final stale = _sourceImage;
+        if (stale != null) {
+          setState(() => _sourceImage = null);
+          WidgetsBinding.instance.addPostFrameCallback((_) => stale.dispose());
+        }
+        unawaited(_ensureSource());
       }
     }
+  }
+
+  /// Back to the picker without restarting: the engine keeps its resources,
+  /// only the session's picture goes away.
+  void _closeImage() {
+    final image = _image;
+    final source = _sourceImage;
+    setState(() {
+      _image = null;
+      _sourceImage = null;
+      _showingSource = false;
+      _sessionOpen = false;
+      _path = null;
+      _openInfo = const {};
+      _histogram = null;
+      _framePixels = null;
+      _imageWidth = 0;
+      _imageHeight = 0;
+      _history.clear();
+      _format = null;
+      _overscanOn = false;
+      _dateOn = false;
+    });
+    image?.dispose();
+    source?.dispose();
+    unawaited(EngineBridge.cachedRaws().then((cached) {
+      if (mounted) setState(() => _cached = cached);
+    }));
   }
 
   Future<void> _pickFormat(FilmFormat? format) async {
@@ -969,6 +1001,8 @@ class _EditorPageState extends State<EditorPage> {
           children: [
             Text(
               'Spektrafilm',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.3,
@@ -977,9 +1011,9 @@ class _EditorPageState extends State<EditorPage> {
             Text(
               _booting
                   ? '正在启动引擎…'
-                  : _path == null
-                      ? '物理胶片模拟 · 相册图片或 RAW'
-                      : '${_films.length} 胶片 · ${_printStocks.length} 印片 · 实时 ${_previewEdge}px',
+                  : _image == null
+                      ? '物理胶片模拟 · 相册 / RAW'
+                      : '${_stockName(_film)} · $_imageWidth×$_imageHeight',
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
           ],
@@ -1001,12 +1035,37 @@ class _EditorPageState extends State<EditorPage> {
             onPressed: _hasSession && !_busy ? _export : null,
             icon: const Icon(Icons.download_rounded),
           ),
-          IconButton(
-            tooltip: '引擎诊断',
-            onPressed: _booting ? null : _showDiagnostics,
-            icon: const Icon(Icons.memory_outlined),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            color: _kSurfaceHigh,
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (value) {
+              if (value == 'diagnostics') _showDiagnostics();
+              if (value == 'close') _closeImage();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'diagnostics',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.memory_outlined, size: 20),
+                  title: Text('引擎诊断'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'close',
+                enabled: _image != null && !_busy,
+                child: const ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.close_rounded, size: 20),
+                  title: Text('关闭照片'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
         ],
       ),
       body: Column(
@@ -1568,7 +1627,21 @@ class _EditorPageState extends State<EditorPage> {
           Switch(
             value: value,
             onChanged: enabled ? onChanged : null,
-            activeThumbColor: _kAccent,
+            // Explicit colours in both states: the default off-state thumb
+            // takes the seed colour and reads as "on" at a glance.
+            thumbColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? const Color(0xFF20160A)
+                  : const Color(0xFF8A909B),
+            ),
+            trackColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? _kAccent
+                  : const Color(0xFF2A2E37),
+            ),
+            trackOutlineColor: WidgetStatePropertyAll(
+              value ? Colors.transparent : const Color(0xFF3A3F49),
+            ),
           ),
         ],
       ),
@@ -1759,8 +1832,8 @@ class _EditorPageState extends State<EditorPage> {
       ),
       _sliderRow(
         theme,
-        label: '偏移强度',
-        valueLabel: _shiftScale.toStringAsFixed(0),
+        label: '色偏强度',
+        valueLabel: '×${_shiftScale.toStringAsFixed(0)}',
         value: _shiftScale,
         min: 1,
         max: 60,
@@ -2090,6 +2163,7 @@ class _EditorPageState extends State<EditorPage> {
   void _resetLive() {
     _pushUndo();
     setState(() {
+      _strength = 1;
       _exposureEv = 0;
       _magenta = 0;
       _yellow = 0;
