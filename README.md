@@ -92,7 +92,7 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 需要 Flutter stable、JDK 17、Android SDK（platform 36）、**NDK 28.2.13676358**、CMake 3.22.1。
 NDK 必须带 `shader-tools/<host>/glslc`（NDK 26+ 都有）。
 
-本机这套便携工具链放在隔壁 `photo_watermark/.tools`（历史原因，与那个项目无关），
+本机这套便携工具链在**工作区之外**：`C://toolchains//flutter-android`，任何项目都不再持有它。
 用 `tool/env.ps1` 引入：
 
 ```powershell
@@ -101,6 +101,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 或者自己设 `SPK_TOOLCHAIN` 指向包含 `flutter/`、`jdk/`、`android-sdk/` 的目录。
+直接 `. C://toolchains//flutter-android//env.ps1` 也可以，两个项目共用同一套环境变量。
 
 ### 2. 拉引擎 + 编 shader
 

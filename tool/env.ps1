@@ -1,14 +1,14 @@
 # Puts the portable Flutter/Android toolchain on PATH for this shell.
 #
-# The toolchain lives beside this repo, in the .tools/ directory of an older
-# project. Override SPK_TOOLCHAIN to point somewhere else.
+# The toolchain lives outside the workspace, at C:\toolchains\flutter-android,
+# so no project folder owns it. Override SPK_TOOLCHAIN to point elsewhere.
 #
 #   . .\tool\env.ps1
 #   flutter build apk --debug
 
 $toolchain = $env:SPK_TOOLCHAIN
 if (-not $toolchain) {
-    $toolchain = "C:\Users\qliu2\Documents\Workspaces\test\mobile_app\photo_watermark\.tools"
+    $toolchain = "C:\toolchains\flutter-android"
 }
 if (-not (Test-Path "$toolchain\flutter\bin\flutter.bat")) {
     throw "Flutter not found under $toolchain. Set SPK_TOOLCHAIN to a directory with flutter/, jdk/, android-sdk/."
