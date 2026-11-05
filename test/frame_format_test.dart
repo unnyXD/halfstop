@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spektrafilm_mobile/frame_format.dart';
+import 'package:halfstop/frame_format.dart';
 
 /// The engine rejects a frame whose aspect is more than 5% off the gate's, so
 /// the crop has to be right before the request is ever sent.

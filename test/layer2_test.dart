@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spektrafilm_mobile/layer2.dart';
+import 'package:halfstop/layer2.dart';
 
 /// The two guarantees this layer has to keep: neutral means "do nothing", and
 /// what export bakes matches what the preview drew.

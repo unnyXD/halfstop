@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
-import 'package:spektrafilm_mobile/photo_import.dart';
+import 'package:halfstop/photo_import.dart';
 
 /// The contract with `spk_open`: linear light, ProPhoto primaries, and a
 /// neutral pixel stays neutral.

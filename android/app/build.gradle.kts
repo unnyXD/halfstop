@@ -11,7 +11,7 @@ plugins {
 val engineRoot = file("../../third_party/spektrafilm")
 
 android {
-    namespace = "dev.spektrafilm.spektrafilm_mobile"
+    namespace = "dev.halfstop.app"
     compileSdk = flutter.compileSdkVersion
     // The pose of NDK that ships glslc in shader-tools/ and Vulkan headers in
     // the sysroot. Pinned so a machine with several NDKs builds the same .so.
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "dev.spektrafilm.spektrafilm_mobile"
+        applicationId = "dev.halfstop.app"
         // Vulkan compute needs API 24 at the floor; 26 drops the devices whose
         // drivers predate the 1.0 conformance fixes this engine relies on.
         minSdk = 26

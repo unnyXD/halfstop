@@ -1,4 +1,4 @@
-package dev.spektrafilm.spektrafilm_mobile
+package dev.halfstop.app
 
 import android.app.Activity
 import android.content.Intent
@@ -316,7 +316,7 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
-        private const val CHANNEL = "spektrafilm/engine"
+        private const val CHANNEL = "halfstop/engine"
         private const val ASSET_ROOT = "engine"
         private const val RESOURCES_VERSION = "3"
         private const val REQUEST_PICK_DOCUMENT = 4701

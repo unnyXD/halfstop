@@ -15,11 +15,15 @@ import 'layer2.dart';
 import 'photo_import.dart';
 import 'stock_catalog.dart';
 
-const Color _kBackground = Color(0xFF0B0C0F);
-const Color _kSurface = Color(0xFF14161B);
-const Color _kSurfaceHigh = Color(0xFF1B1E25);
-const Color _kAccent = Color(0xFFE0A458);
-const Color _kTextDim = Color(0xFF9AA0AA);
+// Darkroom palette: warm black, paper white, safelight amber.
+const Color _kBackground = Color(0xFF0A0908);
+const Color _kSurface = Color(0xFF14120F);
+const Color _kSurfaceHigh = Color(0xFF1C1916);
+const Color _kLine = Color(0xFF221F1B);
+const Color _kLineStrong = Color(0xFF3A342C);
+const Color _kAccent = Color(0xFFE3A35C);
+const Color _kText = Color(0xFFEDE6DA);
+const Color _kTextDim = Color(0xFF8C857A);
 
 /// 预览档位。注意：这里的 “live / 实时” 是引擎的**低延迟预览**，与 Live Photo
 /// （实况照片）无关。本项目只处理静态 RAW，不涉及任何实况照片能力。
@@ -993,52 +997,65 @@ class _EditorPageState extends State<EditorPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: _kBackground,
-        titleSpacing: 20,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
           children: [
-            Text(
-              'Spektrafilm',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
-            ),
-            Text(
-              _booting
-                  ? '正在启动引擎…'
-                  : _image == null
-                      ? '物理胶片模拟 · 相册 / RAW'
-                      : '${_stockName(_film)} · $_imageWidth×$_imageHeight',
-              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
-            ),
+            _buildHeader(theme),
+            Expanded(child: _buildPreview(theme)),
+            if (_error != null) _buildErrorBar(theme),
+            _buildPanel(theme),
           ],
         ),
-        actions: [
-          IconButton(
+      ),
+    );
+  }
+
+  /// Brand lockup, then the three things you actually do to a picture.
+  Widget _buildHeader(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 8, 8),
+      child: Row(
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'HALFSTOP',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 8,
+                  letterSpacing: 3.4,
+                  color: _kAccent.withValues(alpha: 0.9),
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text('半档', style: theme.textTheme.titleLarge),
+            ],
+          ),
+          const Spacer(),
+          _headerAction(
+            icon: Icons.undo_rounded,
             tooltip: '撤销',
-            onPressed:
-                _history.isEmpty || _busy || !_hasSession ? null : _undo,
-            icon: const Icon(Icons.undo_rounded),
+            enabled: _history.isNotEmpty && !_busy && _hasSession,
+            onTap: _undo,
           ),
-          IconButton(
-            tooltip: '导入 RAW',
-            onPressed: _busy ? null : _import,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
+          _headerAction(
+            icon: Icons.add_photo_alternate_outlined,
+            tooltip: '导入',
+            enabled: !_busy,
+            onTap: _import,
           ),
-          IconButton(
-            tooltip: '导出 JPEG',
-            onPressed: _hasSession && !_busy ? _export : null,
-            icon: const Icon(Icons.download_rounded),
+          _headerAction(
+            icon: Icons.download_rounded,
+            tooltip: '导出',
+            enabled: _hasSession && !_busy,
+            onTap: _export,
           ),
           PopupMenuButton<String>(
             tooltip: '更多',
             color: _kSurfaceHigh,
-            icon: const Icon(Icons.more_vert_rounded),
+            icon: const Icon(Icons.more_vert_rounded, size: 20, color: _kTextDim),
             onSelected: (value) {
               if (value == 'diagnostics') _showDiagnostics();
               if (value == 'close') _closeImage();
@@ -1065,15 +1082,31 @@ class _EditorPageState extends State<EditorPage> {
               ),
             ],
           ),
-          const SizedBox(width: 4),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(child: _buildPreview(theme)),
-          if (_error != null) _buildErrorBar(theme),
-          _buildPanel(theme),
-        ],
+    );
+  }
+
+  Widget _headerAction({
+    required IconData icon,
+    required String tooltip,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkResponse(
+        onTap: enabled ? onTap : null,
+        radius: 22,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(
+            icon,
+            size: 20,
+            color: enabled ? _kText : _kTextDim.withValues(alpha: 0.35),
+          ),
+        ),
       ),
     );
   }
@@ -1082,46 +1115,57 @@ class _EditorPageState extends State<EditorPage> {
     final image = _showingSource ? _sourceImage : _image;
     return Container(
       width: double.infinity,
-      color: const Color(0xFF050608),
+      color: _kBackground,
       child: Stack(
         fit: StackFit.expand,
         children: [
           if (image != null)
             Padding(
-              padding: const EdgeInsets.all(8),
-              child: CustomPaint(
-                painter: _PreviewPainter(
-                  image: image,
-                  colorFilter: _layer2.colorFilter,
-                  sourceImage: _sourceImage,
-                  strength: _strength,
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF050403),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _kLine),
                 ),
-                child: const SizedBox.expand(),
+                clipBehavior: Clip.antiAlias,
+                child: CustomPaint(
+                  painter: _PreviewPainter(
+                    image: image,
+                    colorFilter: _layer2.colorFilter,
+                    sourceImage: _sourceImage,
+                    strength: _strength,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
               ),
             )
           else
             _buildEmptyState(theme),
           if (_image != null)
             Positioned(
-              left: 14,
-              top: 12,
+              left: 26,
+              bottom: 24,
               child: _badge(
                 theme,
-                _showingSource
-                    ? '原图 · $_imageWidth×$_imageHeight'
-                    : '$_imageWidth×$_imageHeight · ${_quality == PreviewQuality.fast ? '实时' : '精细'} · '
-                        '$_lastLiveMs ms${_lastReprint ? ' · reprint' : ''} · #$_liveFrames',
+                '${_stockName(_film)} · $_imageWidth×$_imageHeight · $_lastLiveMs ms',
               ),
+            ),
+          if (_image != null && _strength < 0.999)
+            Positioned(
+              left: 26,
+              bottom: 62,
+              child: _badge(theme, '强度 ${(_strength * 100).round()}%'),
             ),
           if (_image != null && _showHistogram)
             Positioned(
-              right: 14,
-              bottom: 12,
+              right: 26,
+              bottom: 24,
               child: HistogramView(data: _histogram),
             ),
           if (_image != null)
             Positioned(
-              right: 14,
+              right: 26,
               top: 12,
               child: _iconPill(
                 icon: Icons.compare_arrows_rounded,
@@ -1131,19 +1175,26 @@ class _EditorPageState extends State<EditorPage> {
             ),
           if (_busy || _booting)
             Container(
-              color: Colors.black.withValues(alpha: 0.45),
+              color: const Color(0xFF0A0908).withValues(alpha: 0.72),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const CircularProgressIndicator(strokeWidth: 2.4),
-                    const SizedBox(height: 14),
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.8,
+                        color: _kAccent,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       _booting
                           ? '加载引擎与资源…'
                           : (_busyLabel ??
                               (_quality == PreviewQuality.fine ? '精细渲染中…' : '渲染中…')),
-                      style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+                      style: theme.textTheme.labelMedium,
                     ),
                   ],
                 ),
@@ -1157,96 +1208,81 @@ class _EditorPageState extends State<EditorPage> {
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(28),
+        padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: _kAccent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.camera_roll_outlined, color: _kAccent, size: 30),
+            const SizedBox(
+              width: 86,
+              height: 58,
+              child: CustomPaint(painter: _FrameMarkPainter()),
             ),
             const SizedBox(height: 18),
             Text(
-              '选一张照片开始',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              '半档',
+              style: theme.textTheme.titleLarge?.copyWith(fontSize: 34, letterSpacing: 8),
             ),
-            const SizedBox(height: 8),
-            Text(
-              '相册图片由本机解码后直接进引擎，RAW 交给 LibRaw。\n'
-              '两者走同一套胶片模型，都在本机 Vulkan 上算。',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.6),
-            ),
+            const SizedBox(height: 12),
+            Container(width: 26, height: 1, color: _kLineStrong),
             const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: _kSurfaceHigh,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF2A2E37)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '胶片：${_stockName(_film)}',
-                    style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '相纸：${_stockName(_paper)}',
-                    style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '可在下方切换，选好后导入即可',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: _kAccent.withValues(alpha: 0.8),
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-              ),
+            Text(
+              '物理胶片模拟 · 光谱计算全在本机',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 28),
             Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                FilledButton.icon(
-                  onPressed: _busy || _booting ? null : _importPhoto,
-                  icon: const Icon(Icons.photo_library_outlined, size: 18),
-                  label: const Text('从相册选择'),
+                Expanded(
+                  child: _entryCard(
+                    theme,
+                    icon: Icons.photo_library_outlined,
+                    title: '从相册选择',
+                    caption: 'JPEG / PNG / WebP',
+                    enabled: !_busy && !_booting,
+                    onTap: _importPhoto,
+                    filled: true,
+                  ),
                 ),
                 const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _busy || _booting ? null : _importRaw,
-                  icon: const Icon(Icons.folder_open_rounded, size: 18),
-                  label: const Text('RAW 文件'),
+                Expanded(
+                  child: _entryCard(
+                    theme,
+                    icon: Icons.raw_on_outlined,
+                    title: 'RAW 文件',
+                    caption: 'ARW / NEF / DNG…',
+                    enabled: !_busy && !_booting,
+                    onTap: _importRaw,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
-              '相册支持 JPEG / PNG / WebP；RAW 支持 ARW / DNG / CR2 / CR3 / NEF / RAF / ORF 等',
+              '两条路都走同一套胶片模型：相册图片由本机转成线性 ProPhoto，RAW 交给 LibRaw。',
               textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: _kTextDim,
                 fontSize: 10,
                 height: 1.5,
+                color: _kTextDim.withValues(alpha: 0.8),
               ),
             ),
             if (_cached.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Text(
-                '最近导入 · 长按删除',
-                style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim),
+              const SizedBox(height: 26),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(width: 14, height: 1, color: _kLineStrong),
+                  const SizedBox(width: 10),
+                  Text(
+                    '最近导入',
+                    style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.6),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(width: 14, height: 1, color: _kLineStrong),
+                ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1258,18 +1294,79 @@ class _EditorPageState extends State<EditorPage> {
                       child: ActionChip(
                         avatar: Icon(
                           raw.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
-                          size: 16,
+                          size: 15,
+                          color: _kTextDim,
                         ),
                         label: Text(
                           '${raw.name} · ${raw.sizeLabel}',
-                          style: const TextStyle(fontSize: 12),
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                        backgroundColor: _kSurfaceHigh,
+                        side: const BorderSide(color: _kLineStrong),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(9),
                         ),
                         onPressed: _busy || _booting ? null : () => _openCached(raw),
                       ),
                     ),
                 ],
               ),
+              const SizedBox(height: 6),
+              Text(
+                '长按可删除缓存副本',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 9.5,
+                  color: _kTextDim.withValues(alpha: 0.6),
+                ),
+              ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _entryCard(
+    ThemeData theme, {
+    required IconData icon,
+    required String title,
+    required String caption,
+    required bool enabled,
+    required VoidCallback onTap,
+    bool filled = false,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: enabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+        decoration: BoxDecoration(
+          color: filled ? _kAccent.withValues(alpha: 0.12) : _kSurfaceHigh,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: filled ? _kAccent.withValues(alpha: 0.45) : _kLineStrong,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: enabled ? (filled ? _kAccent : _kText) : _kTextDim,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(fontSize: 12.5),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              caption,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                letterSpacing: 0.2,
+              ),
+            ),
           ],
         ),
       ),
@@ -1311,16 +1408,28 @@ class _EditorPageState extends State<EditorPage> {
     return Container(
       decoration: const BoxDecoration(
         color: _kSurface,
-        border: Border(top: BorderSide(color: Color(0xFF23262E))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        border: Border(top: BorderSide(color: _kLine)),
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 348,
+          height: 360,
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                padding: const EdgeInsets.only(top: 9, bottom: 3),
+                child: Container(
+                  width: 34,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: _kLineStrong,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
                 child: Row(
                   children: [
                     Expanded(child: _buildStockField(theme, film: true, enabled: canPick)),
@@ -1352,39 +1461,34 @@ class _EditorPageState extends State<EditorPage> {
   Widget _buildTabs(ThemeData theme, bool canRender) {
     Widget tab(_PanelLayer layer, String label) {
       final selected = _panelLayer == layer;
-      return InkWell(
-        borderRadius: BorderRadius.circular(8),
+      return GestureDetector(
         onTap: () => setState(() => _panelLayer = layer),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: selected ? _kAccent : _kTextDim,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 3),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                height: 2,
-                width: selected ? 20 : 0,
-                decoration: BoxDecoration(
-                  color: _kAccent,
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-            ],
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? _kAccent.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? _kAccent.withValues(alpha: 0.55) : _kLineStrong,
+            ),
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: selected ? _kAccent : _kTextDim,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              letterSpacing: 1,
+            ),
           ),
         ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 4),
       child: Row(
         children: [
           tab(_PanelLayer.print, '印片'),
@@ -1417,8 +1521,9 @@ class _EditorPageState extends State<EditorPage> {
             style: TextButton.styleFrom(
               visualDensity: VisualDensity.compact,
               foregroundColor: _kTextDim,
-              minimumSize: const Size(48, 32),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(44, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              textStyle: theme.textTheme.labelMedium,
             ),
             child: const Text('重置'),
           ),
@@ -1731,36 +1836,52 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   /// Layer 1 controls: every one of these ends in an engine reprint.
+  Widget _qualityPill(ThemeData theme, PreviewQuality quality, String label) {
+    final selected = _quality == quality;
+    return GestureDetector(
+      onTap: _busy
+          ? null
+          : () {
+              if (selected) return;
+              setState(() => _quality = quality);
+              if (quality == PreviewQuality.fine) {
+                _renderFine();
+              } else if (_hasSession) {
+                _requestLive();
+              }
+            },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? _kAccent.withValues(alpha: 0.14) : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected ? _kAccent.withValues(alpha: 0.55) : _kLineStrong,
+          ),
+        ),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 10.5,
+            letterSpacing: 0.4,
+            color: selected ? _kAccent : _kTextDim,
+          ),
+        ),
+      ),
+    );
+  }
+
   List<Widget> _printSliders(ThemeData theme, bool canRender) {
     return [
       Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
         child: Row(
           children: [
-            SegmentedButton<PreviewQuality>(
-              showSelectedIcon: false,
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
-              ),
-              segments: const [
-                ButtonSegment(value: PreviewQuality.fast, label: Text('实时 1600')),
-                ButtonSegment(value: PreviewQuality.fine, label: Text('精细 3400')),
-              ],
-              selected: {_quality},
-              onSelectionChanged: _busy
-                  ? null
-                  : (selection) {
-                      final quality = selection.first;
-                      setState(() => _quality = quality);
-                      if (quality == PreviewQuality.fine) {
-                        _renderFine();
-                      } else if (_hasSession) {
-                        _requestLive();
-                      }
-                    },
-            ),
+            _qualityPill(theme, PreviewQuality.fast, '实时 · 1600'),
+            const SizedBox(width: 6),
+            _qualityPill(theme, PreviewQuality.fine, '精细 · 3400'),
+            const Spacer(),
           ],
         ),
       ),
@@ -1966,33 +2087,42 @@ class _EditorPageState extends State<EditorPage> {
   Widget _buildStockField(ThemeData theme, {required bool film, required bool enabled}) {
     final value = film ? _film : _paper;
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       onTap: enabled && _stocks.isNotEmpty ? () => _showStockSheet(film: film) : null,
       child: Container(
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        height: 50,
+        padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
         decoration: BoxDecoration(
           color: _kSurfaceHigh,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF2A2E37)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _kLineStrong),
         ),
         child: Row(
           children: [
-            Text(
-              film ? '胶片 ' : '相纸 ',
-              style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
-            ),
             Expanded(
-              child: Text(
-                _stocks.isEmpty ? '未找到 profile' : _stockName(value),
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w500,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    film ? '胶片' : '相纸',
+                    style: theme.textTheme.labelSmall?.copyWith(fontSize: 9.5),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    _stocks.isEmpty ? '未找到 profile' : _stockName(value),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _kText,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const Icon(Icons.expand_more, size: 18, color: _kTextDim),
+            const Icon(Icons.unfold_more_rounded, size: 15, color: _kTextDim),
           ],
         ),
       ),
@@ -2096,25 +2226,31 @@ class _EditorPageState extends State<EditorPage> {
     ValueChanged<double>? onChangeEnd,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+      padding: const EdgeInsets.fromLTRB(12, 2, 14, 2),
       child: Row(
         children: [
           SizedBox(
-            width: 58,
+            width: 62,
             child: Text(
               label,
-              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: enabled ? _kTextDim : _kTextDim.withValues(alpha: 0.4),
+              ),
             ),
           ),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 2,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
                 activeTrackColor: _kAccent,
-                inactiveTrackColor: const Color(0xFF333842),
+                inactiveTrackColor: _kLineStrong,
+                disabledActiveTrackColor: _kLine,
+                disabledInactiveTrackColor: _kLine,
                 thumbColor: _kAccent,
+                disabledThumbColor: _kLineStrong,
+                overlayColor: _kAccent.withValues(alpha: 0.14),
               ),
               child: Slider(
                 value: value.clamp(min, max),
@@ -2127,13 +2263,15 @@ class _EditorPageState extends State<EditorPage> {
             ),
           ),
           SizedBox(
-            width: 70,
+            width: 64,
             child: Text(
               valueLabel,
               textAlign: TextAlign.right,
               style: theme.textTheme.labelSmall?.copyWith(
                 fontFeatures: const [ui.FontFeature.tabularFigures()],
-                color: enabled ? theme.colorScheme.onSurface : _kTextDim,
+                letterSpacing: 0,
+                fontSize: 11,
+                color: enabled ? _kText : _kTextDim.withValues(alpha: 0.45),
               ),
             ),
           ),
@@ -2175,16 +2313,18 @@ class _EditorPageState extends State<EditorPage> {
 
   Widget _badge(ThemeData theme, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: const Color(0xFF050403).withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
       child: Text(
         text,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: Colors.white70,
+          fontSize: 10,
+          letterSpacing: 0.2,
+          color: const Color(0xFFCFC7BA),
           fontFeatures: const [ui.FontFeature.tabularFigures()],
         ),
       ),
@@ -2193,19 +2333,22 @@ class _EditorPageState extends State<EditorPage> {
 
   Widget _iconPill({required IconData icon, required String label, VoidCallback? onTap}) {
     return Material(
-      color: Colors.black.withValues(alpha: 0.6),
-      borderRadius: BorderRadius.circular(8),
+      color: const Color(0xFF050403).withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(7),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: Colors.white70),
-              const SizedBox(width: 6),
-              Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+              Icon(icon, size: 13, color: const Color(0xFFCFC7BA)),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(fontSize: 10.5, color: Color(0xFFCFC7BA)),
+              ),
             ],
           ),
         ),
@@ -2219,6 +2362,48 @@ class _EditorPageState extends State<EditorPage> {
 /// `print` is the enlarger/film side and costs an engine reprint; `color` is
 /// Layer 2 and costs nothing but a repaint.
 enum _PanelLayer { print, color, frame }
+
+/// A 135 frame, drawn by hand: perforations and a gate. Used as the mark on
+/// the landing screen so the wordmark is not repeated from the header.
+class _FrameMarkPainter extends CustomPainter {
+  const _FrameMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const amber = Color(0xFFE3A35C);
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = amber.withValues(alpha: 0.55);
+    final hole = Paint()..color = amber.withValues(alpha: 0.3);
+
+    final gate = Rect.fromLTWH(0, 13, size.width, size.height - 26);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(gate, const Radius.circular(3)),
+      line,
+    );
+
+    const holeW = 5.0;
+    const holeH = 4.0;
+    const gap = 3.6;
+    for (final y in const [4.5, 49.5]) {
+      var x = 7.0;
+      while (x + holeW <= size.width - 6) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x, y, holeW, holeH),
+            const Radius.circular(1),
+          ),
+          hole,
+        );
+        x += holeW + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
 
 /// Draws the frame with the Layer 2 colour matrix, keeping the fit the old
 /// `RawImage` had. `colorFilter` is a GPU operation, so dragging a Layer 2

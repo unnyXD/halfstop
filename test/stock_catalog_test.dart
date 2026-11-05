@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spektrafilm_mobile/stock_catalog.dart';
+import 'package:halfstop/stock_catalog.dart';
 
 /// The picker's three groups come straight from the profiles, so a bundle
 /// update that adds a stock lands in the right section without a code change.

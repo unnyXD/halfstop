@@ -1,6 +1,6 @@
-# Spektrafilm Mobile
+# 半档 / Halfstop
 
-Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在 Android 上。
+半档是一个 Android 上的物理胶片模拟器：Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在 Android 上。
 没有 Python，没有服务端，没有 LUT 近似——光谱计算、coupler、颗粒、光晕都在手机 GPU 上算。
 
 ![引擎自检](docs/engine-selftest.png)

@@ -106,7 +106,7 @@ class RenderException implements Exception {
 class EngineBridge {
   EngineBridge._();
 
-  static const MethodChannel _channel = MethodChannel('spektrafilm/engine');
+  static const MethodChannel _channel = MethodChannel('halfstop/engine');
   static const int expectedAbi = 3;
 
   static DynamicLibrary? _cached;

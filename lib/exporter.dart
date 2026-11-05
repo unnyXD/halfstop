@@ -106,7 +106,7 @@ Future<ExportedPhoto> encodeAndSave({
     if (!await Gal.hasAccess(toAlbum: true)) {
       await Gal.requestAccess(toAlbum: true);
     }
-    await Gal.putImage(file.path, album: 'Spektrafilm');
+    await Gal.putImage(file.path, album: '半档');
     inGallery = true;
   } on GalException {
     // Saving to the gallery is the goal, not a precondition: keep the file in
@@ -200,12 +200,12 @@ _Encoded _encodeJpeg({
   return _Encoded(bytes, image.width, image.height);
 }
 
-/// `spektrafilm_20261105_121503_kodak_portra_400.jpg`
+/// `halfstop_20261105_121503_kodak_portra_400.jpg`
 String exportFileName(String filmId, {DateTime? now}) {
   final stamp = (now ?? DateTime.now());
   String two(int v) => v.toString().padLeft(2, '0');
   final date =
       '${stamp.year}${two(stamp.month)}${two(stamp.day)}_${two(stamp.hour)}${two(stamp.minute)}${two(stamp.second)}';
   final slug = filmId.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
-  return 'spektrafilm_${date}_$slug.jpg';
+  return 'halfstop_${date}_$slug.jpg';
 }
