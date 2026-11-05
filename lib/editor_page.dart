@@ -1026,14 +1026,14 @@ class _EditorPageState extends State<EditorPage> {
             _buildHeader(theme),
             Expanded(child: _buildPreview(theme)),
             if (_error != null) _buildErrorBar(theme),
-            _buildPanel(theme),
+            if (_image != null) _buildPanel(theme),
             // The action bar belongs to the open sheet. Collapsed, it goes
             // away and the picture gets the room instead.
             AnimatedSize(
               duration: const Duration(milliseconds: 240),
               curve: Curves.easeOutCubic,
               alignment: Alignment.topCenter,
-              child: _panelExpanded
+              child: _image != null && _panelExpanded
                   ? _buildActionBar(theme)
                   : const SizedBox(width: double.infinity, height: 0),
             ),
@@ -1045,8 +1045,27 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   /// Back, the original/preview switch, and export — the design's top row.
+  /// With no picture open there is nothing to switch or export, so the row
+  /// falls back to the wordmark instead of showing dead controls.
   Widget _buildHeader(ThemeData theme) {
     final hasImage = _image != null;
+    if (!hasImage) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+        child: Row(
+          children: [
+            Text(
+              '半档',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontSize: 20,
+                letterSpacing: 4,
+              ),
+            ),
+            const Spacer(),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 8, 6),
       child: Row(
@@ -1056,7 +1075,7 @@ class _EditorPageState extends State<EditorPage> {
             height: 40,
             child: IconButton(
               tooltip: '关闭照片',
-              onPressed: hasImage && !_busy ? _closeImage : null,
+              onPressed: _busy ? null : _closeImage,
               icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
               color: _kText,
               disabledColor: _kTextDim.withValues(alpha: 0.28),
@@ -1132,21 +1151,23 @@ class _EditorPageState extends State<EditorPage> {
     final image = _showingSource ? _sourceImage : _image;
     final preview = Container(
       width: double.infinity,
-      color: _kBackground,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0B0A09), Color(0xFF15120F), _kBackground],
+          stops: [0.0, 0.45, 1.0],
+        ),
+      ),
       child: Stack(
         fit: StackFit.expand,
         children: [
           if (image == null)
             _buildEmptyState(theme)
           else ...[
-            // A blurred copy fills the space a 3:2 frame cannot use on a tall
-            // phone, so the picture sits on something instead of on black.
-            RepaintBoundary(
-              child: CustomPaint(
-                painter: _BackdropPainter(image: image),
-                child: const SizedBox.expand(),
-              ),
-            ),
+            // A soft neutral wash behind the picture. It used to be a blurred
+            // copy of the photo, which showed up as a coloured band above the
+            // frame — this has no picture in it, so nothing can bleed.
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 2, 14, 2),
               child: LayoutBuilder(
@@ -1345,12 +1366,8 @@ class _EditorPageState extends State<EditorPage> {
               height: 58,
               child: CustomPaint(painter: _FrameMarkPainter()),
             ),
-            const SizedBox(height: 18),
-            Text(
-              '半档',
-              style: theme.textTheme.titleLarge?.copyWith(fontSize: 34, letterSpacing: 8),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
+            // The wordmark is in the header now; repeating it here was noise.
             Container(width: 26, height: 1, color: _kLineStrong),
             const SizedBox(height: 14),
             Text(
@@ -2563,85 +2580,141 @@ class _EditorPageState extends State<EditorPage> {
   /// One sheet for both fields, grouped by what the stock actually is. The
   /// categories come from the profiles' own `stage`/`support`, so a bundle
   /// update reorders this list without a code change.
-  Future<void> _showStockSheet({required bool film}) async {
-    final grouped = groupStocks(
-      _stocks.where((stock) => film ? stock.isFilm : stock.isPrintStock),
-    );
-    final current = film ? _film : _paper;
+  /// One sheet for both stocks. The row that opens it cannot carry two tap
+  /// targets, so the switch lives here — 胶片 on one side, 相纸 / 印片 on the
+  /// other. Long-pressing the row still jumps straight to the paper side.
+  Future<void> _showStockSheet({bool film = true}) async {
+    var showFilm = film;
 
     final picked = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: _kSurface,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.72,
-        maxChildSize: 0.92,
-        builder: (context, controller) {
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
           final theme = Theme.of(context);
-          return ListView(
-            controller: controller,
-            padding: const EdgeInsets.only(bottom: 28),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: Text(
-                  film ? '选择胶片' : '选择相纸 / 印片胶片',
-                  style: theme.textTheme.titleMedium,
-                ),
-              ),
-              for (final entry in grouped.entries) ...[
+          final current = showFilm ? _film : _paper;
+          final grouped = groupStocks(
+            _stocks.where((stock) => showFilm ? stock.isFilm : stock.isPrintStock),
+          );
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.72,
+            maxChildSize: 0.92,
+            builder: (context, controller) => ListView(
+              controller: controller,
+              padding: const EdgeInsets.only(bottom: 28),
+              children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Text(
-                        entry.key.label,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: _kAccent,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      _sheetSwitch(
+                        theme,
+                        '胶片',
+                        showFilm,
+                        () => setSheetState(() => showFilm = true),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          entry.key.hint,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: _kTextDim,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${entry.value.length}',
-                        style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+                      _sheetSwitch(
+                        theme,
+                        '相纸 / 印片',
+                        !showFilm,
+                        () => setSheetState(() => showFilm = false),
                       ),
                     ],
                   ),
                 ),
-                for (final stock in entry.value)
-                  ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-                    title: Text(stock.name, style: theme.textTheme.bodyMedium),
-                    trailing: stock.id == current
-                        ? const Icon(Icons.check_rounded, size: 18, color: _kAccent)
-                        : null,
-                    onTap: () => Navigator.of(context).pop(stock.id),
+                for (final entry in grouped.entries) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          entry.key.label,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: _kAccent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            entry.key.hint,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: _kTextDim,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${entry.value.length}',
+                          style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+                        ),
+                      ],
+                    ),
                   ),
+                  for (final stock in entry.value)
+                    ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      title: Text(stock.name, style: theme.textTheme.bodyMedium),
+                      trailing: stock.id == current
+                          ? const Icon(Icons.check_rounded, size: 18, color: _kAccent)
+                          : null,
+                      onTap: () => Navigator.of(context).pop(stock.id),
+                    ),
+                ],
               ],
-            ],
+            ),
           );
         },
       ),
     );
 
-    if (picked != null && picked != current) {
-      await _changeStock(film ? 'film_stock' : 'print_stock', picked);
+    if (picked == null) return;
+    Stock? stock;
+    for (final candidate in _stocks) {
+      if (candidate.id == picked) {
+        stock = candidate;
+        break;
+      }
     }
+    if (stock == null) return;
+    // Which slot it belongs in follows from the profile itself, not from which
+    // tab happened to be open when it was tapped.
+    if (stock.isFilm) {
+      if (picked != _film) await _changeStock('film_stock', picked);
+    } else if (picked != _paper) {
+      await _changeStock('print_stock', picked);
+    }
+  }
+
+  Widget _sheetSwitch(ThemeData theme, String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? _kAccent.withValues(alpha: 0.14) : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected ? _kAccent.withValues(alpha: 0.55) : _kLineStrong,
+          ),
+        ),
+        child: Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: selected ? _kAccent : _kTextDim,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _sliderRow(
@@ -2820,42 +2893,6 @@ class _FrameMarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// The picture, blown up to cover the whole preview area, blurred and dimmed.
-/// It exists so the unused bands around a 3:2 frame read as part of the photo
-/// rather than as empty black.
-class _BackdropPainter extends CustomPainter {
-  _BackdropPainter({required this.image});
-
-  final ui.Image image;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final source = Size(image.width.toDouble(), image.height.toDouble());
-    final fitted = applyBoxFit(BoxFit.cover, source, size);
-    final destination = Alignment.center.inscribe(
-      fitted.destination,
-      Offset.zero & size,
-    );
-    canvas.drawImageRect(
-      image,
-      Offset.zero & source,
-      destination,
-      Paint()
-        ..filterQuality = FilterQuality.low
-        ..imageFilter = ui.ImageFilter.blur(sigmaX: 34, sigmaY: 34),
-    );
-    // Scrim: the framed photo has to stay the subject.
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = _kBackground.withValues(alpha: 0.78),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BackdropPainter oldDelegate) =>
-      oldDelegate.image != image;
 }
 
 /// Draws the frame with the Layer 2 colour matrix, keeping the fit the old
