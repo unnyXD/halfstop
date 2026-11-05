@@ -6,7 +6,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// The native engine is vendored from SpektraLab (Windows_Linux branch):
+// The native engine is vendored from upstream spektrafilm (Windows_Linux branch):
 // C++20 core + Vulkan compute backend, no Python at run time.
 val engineRoot = file("../../third_party/spektrafilm")
 

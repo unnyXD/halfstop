@@ -1,7 +1,7 @@
 # Native build for the Android app.
 #
 # The render engine is the portable C++20 core + Vulkan compute backend that
-# SpektraLab already uses on Windows/Linux. Nothing here is Android-specific
+# the upstream engine already uses on Windows/Linux. Nothing here is Android-specific
 # inside engine/: we only tell its CMake where the toolchain's Vulkan headers
 # and shader compiler live, switch off the desktop/host/test targets, and add
 # a small C ABI shim that dart:ffi loads.
@@ -22,7 +22,8 @@ endif()
 # --- Vulkan headers and shader compiler ---------------------------------
 # The NDK ships both: <sysroot>/usr/include/vulkan and shader-tools/<host>/glslc.
 # glslc is shaderc's front end; it takes the same -I/-o as glslangValidator but
-# spells the target flags differently (see SPEKTRALAB_GLSLANG_FLAGS below).
+# spells the target flags differently (see SPEKTRALAB_GLSLANG_FLAGS below,
+# the option names follow the upstream engine's CMake and must not be renamed).
 if(CMAKE_HOST_WIN32)
     set(SPK_HOST_TAG "windows-x86_64")
     set(SPK_GLSLC "${ANDROID_NDK}/shader-tools/${SPK_HOST_TAG}/glslc.exe")

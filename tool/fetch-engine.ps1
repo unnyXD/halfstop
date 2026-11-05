@@ -1,4 +1,4 @@
-# Fetches the pinned SpektraLab engine source into third_party/spektrafilm.
+# Fetches the pinned spektrafilm engine source into third_party/spektrafilm.
 #
 # github.com itself is not reachable from this machine, but codeload.github.com
 # is, so the tarball is used instead of a git clone. The tree is pinned to
@@ -8,7 +8,7 @@
 # Two patches are applied after extraction:
 #
 #   1. tool/patches/engine-android.patch -- the Android fixes from
-#      SAINTTaiYi/SpektraLab-Android (GPL-3.0-or-later): row-banded dispatches
+#      upstream engine (GPL-3.0-or-later): row-banded dispatches
 #      that keep every binding inside maxStorageBufferRange, the 2^24-element
 #      dispatch split, the IIR watchdog chunking, banded RGBA16 packing, and
 #      mapped export buffers. Without them a Vulkan phone cannot render above

@@ -1,6 +1,6 @@
 # 半档 / Halfstop
 
-Android 上的物理胶片模拟相机后期应用。Flutter 前端 + [SpektraLab](https://github.com/SAINTTaiYi/SpektraLab-Android) 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在手机上——没有 Python，没有服务端，没有 LUT 近似，光谱计算、coupler、颗粒、光晕全部在 GPU 上现场算。
+Android 上的物理胶片模拟相机后期应用。Flutter 前端 + Spektrafilm 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在手机上——没有 Python，没有服务端，没有 LUT 近似，光谱计算、coupler、颗粒、光晕全部在 GPU 上现场算。
 
 ![引擎自检](docs/engine-selftest.png)
 
@@ -64,7 +64,7 @@ Android 上的物理胶片模拟相机后期应用。Flutter 前端 + [SpektraLa
 │         ▼                                                   │
 │  libspektrafilm.so                                          │
 │  ├─ spk_mobile.cpp   探针 + 会话/参数/渲染 C ABI            │
-│  └─ engine/          spektralab_core + pipeline + Vulkan    │
+│  └─ engine/          spektrafilm core + pipeline + Vulkan   │
 │         ├─ Vulkan compute (49 个 SPIR-V shader)             │
 │         └─ assets/engine/** → filesDir/engine/**           │
 └─────────────────────────────────────────────────────────────┘
@@ -116,7 +116,6 @@ release（arm64）产物约 **33.6 MB**：引擎约 3.3 MB、Flutter 约 11 MB�
 
 ## 许可
 
-- 引擎、胶片模型、profile：**GPL-3.0-or-later**（上游 spektrafilm / SpektraLab），任何分发版本必须以 GPLv3 开源
+- 引擎、胶片模型、profile：**GPL-3.0-or-later**（上游 spektrafilm 项目），任何分发版本必须以 GPLv3 开源
 - 胶片/相纸 profile 与打印 LUT：**CC BY-SA 4.0**
 - 本移植代码同样按 **GPL-3.0-or-later** 发布，保留上游署名
-- 上游的 “SpektraLab” 名称与图标是原作者商标，本项目未使用；本项目基于 SpektraLab / spektrafilm 引擎
