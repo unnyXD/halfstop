@@ -5,7 +5,7 @@ import 'package:halfstop/frame_format.dart';
 /// the crop has to be right before the request is ever sent.
 void main() {
   _cropPlacementTests();
-  _cropResizeTests();
+  _cropZoomTests();
 
   test('a 3:2 camera frame barely moves for 135, and not at all for 6x9', () {
     // 135's gate is 36.25 × 24.3 — 0.55% off 3:2, so the crop is a sliver.
@@ -116,51 +116,36 @@ void _cropPlacementTests() {
   });
 }
 
-void _cropResizeTests() {
-  const crop = CropBox(0.2, 0.2, 0.6, 0.6);
+void _cropZoomTests() {
+  // Gate centred in the frame: 0.25..0.75 both ways.
+  const gate = CropBox(0.25, 0.25, 0.5, 0.5);
 
-  test('dragging the right edge only moves the right edge', () {
-    final resized = resizeCrop(crop, CropHandle.right, 0.1, 0);
-    expect(resized.x, closeTo(0.2, 1e-9));
-    expect(resized.width, closeTo(0.7, 1e-9));
-    expect(resized.height, closeTo(0.6, 1e-9));
+  test('zooming keeps the picture point under the focal point', () {
+    final focal = const Offset(0.6, 0.4);
+    final zoomed = zoomGate(gate, 2, focal);
+    expect(zoomed.width, closeTo(0.25, 1e-9));
+    // The same image point must land on the same focal position.
+    final px = (focal.dx - zoomed.centerX) / zoomed.width + 0.5;
+    final py = (focal.dy - zoomed.centerY) / zoomed.height + 0.5;
+    expect(px, closeTo(0.7, 1e-9));
+    expect(py, closeTo(0.3, 1e-9));
   });
 
-  test('dragging a corner moves both of its edges', () {
-    final resized = resizeCrop(crop, CropHandle.topLeft, 0.05, 0.05);
-    expect(resized.x, closeTo(0.25, 1e-9));
-    expect(resized.y, closeTo(0.25, 1e-9));
-    expect(resized.width, closeTo(0.55, 1e-9));
-    expect(resized.height, closeTo(0.55, 1e-9));
+  test('zooming preserves the gate shape', () {
+    final zoomed = zoomGate(gate, 1.5, const Offset(0.5, 0.5));
+    expect(zoomed.width / zoomed.height, closeTo(gate.width / gate.height, 1e-9));
   });
 
-  test('the window cannot be dragged past the frame', () {
-    final resized = resizeCrop(crop, CropHandle.right, 5, 0);
-    expect(resized.x + resized.width, closeTo(1.0, 1e-9));
-    final shrunk = resizeCrop(crop, CropHandle.right, -5, 0);
-    expect(shrunk.width, greaterThanOrEqualTo(0.08));
+  test('zooming out relaxes back to the full frame, never past it', () {
+    final zoomed = zoomGate(gate, 0.01, const Offset(0.5, 0.5));
+    expect(zoomed.isFull, isTrue);
   });
 
-  test('a locked aspect keeps the ratio while resizing', () {
-    // A 3:1 gate on a 3:2 frame: w/h must be 3 * 2 / 3 = 2 in normalised units.
-    final start = const CropBox(0.1, 0.1, 0.5, 0.5);
-    final resized = resizeCrop(
-      start,
-      CropHandle.right,
-      0.2,
-      0,
-      lockedAspect: 3.0,
-      frameWidth: 3.0,
-      frameHeight: 2.0,
-    );
-    expect(resized.width / resized.height, closeTo(2.0, 0.01));
-    // The dragged edge moved; the opposite one stayed.
-    expect(resized.x, closeTo(0.1, 1e-9));
-  });
-
-  test('pinch scales about the centre', () {
-    final scaled = scaleCrop(crop, 0.5);
-    expect(scaled.width, closeTo(0.3, 1e-9));
-    expect(scaled.centerX, closeTo(crop.centerX, 1e-9));
+  test('a hard zoom keeps the gate inside the frame', () {
+    final zoomed = zoomGate(gate, 8, const Offset(0.0, 1.0));
+    expect(zoomed.x, greaterThanOrEqualTo(0));
+    expect(zoomed.y, greaterThanOrEqualTo(0));
+    expect(zoomed.x + zoomed.width, lessThanOrEqualTo(1.0));
+    expect(zoomed.y + zoomed.height, lessThanOrEqualTo(1.0));
   });
 }

@@ -138,8 +138,7 @@ class _EditorPageState extends State<EditorPage> {
   CropBox _cropDraft = CropBox.full;
   ui.Image? _cropCanvas;
 
-  /// Which grip a crop gesture grabbed, and the pinch progress so far.
-  CropHandle? _activeHandle;
+  /// The pinch progress so far, so updates apply the delta since last frame.
   double _cropGestureScale = 1;
   bool _overscanOn = false;
   /// `strip` lays out the whole film width, `filed` a sliver of rebate.
@@ -1360,12 +1359,13 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
-  /// Crop mode: the whole picture, a window you can drag by its edges, corners
-  /// or middle, and pinch to scale.
+  /// Crop mode: the gate is fixed — it *is* the film format — and the picture
+  /// moves and scales under it. Pinch zooms around the fingers, one finger
+  /// drags the picture.
   ///
-  /// Free ratios are allowed — the engine only cares about the gate's shape
-  /// when the rebate is drawn, so the lock appears with 片边 and disappears
-  /// without it.
+  /// A smaller gate over the same source renders as a zoom, which is why no
+  /// separate "scale" parameter exists: zoom is just how much of the picture
+  /// the gate covers.
   Widget _buildCropPreview(ThemeData theme) {
     final canvas = _cropCanvas;
     if (canvas == null) return const SizedBox.expand();
@@ -1383,43 +1383,48 @@ class _EditorPageState extends State<EditorPage> {
           Expanded(
             child: LayoutBuilder(
               builder: (context, box) {
-                final frame = _containRect(
-                  box.biggest,
-                  Size(canvas.width.toDouble(), canvas.height.toDouble()),
-                );
                 final crop = _cropDraft;
-                final window = Rect.fromLTWH(
-                  frame.left + crop.x * frame.width,
-                  frame.top + crop.y * frame.height,
-                  crop.width * frame.width,
-                  crop.height * frame.height,
+                final source = Size(
+                  canvas.width.toDouble(),
+                  canvas.height.toDouble(),
                 );
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onScaleStart: (details) => _cropGestureStart(
-                          details.localFocalPoint,
-                          window,
-                        ),
-                        onScaleUpdate: (details) => _cropGestureUpdate(
-                          details,
-                          frame,
-                        ),
-                        onScaleEnd: (_) => _activeHandle = null,
-                        child: CustomPaint(
-                          painter: _CropPainter(
-                            image: canvas,
-                            crop: crop,
-                            frame: frame,
-                            showHandles: true,
-                          ),
-                          child: const SizedBox.expand(),
-                        ),
-                      ),
+                // The window keeps the gate's shape and sits at 92% of the
+                // viewport, so the picture stays visible on every side.
+                final available =
+                    Size(box.maxWidth * 0.92, box.maxHeight * 0.92);
+                final windowSize = Size(
+                  source.width * crop.width,
+                  source.height * crop.height,
+                );
+                final target = _containRect(available, windowSize).shift(
+                  Offset(
+                    (box.maxWidth - available.width) / 2,
+                    (box.maxHeight - available.height) / 2,
+                  ),
+                );
+                final scale = target.width / (source.width * crop.width);
+                final origin = Offset(
+                  target.center.dx - crop.centerX * source.width * scale,
+                  target.center.dy - crop.centerY * source.height * scale,
+                );
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onScaleStart: (_) => _cropGestureScale = 1,
+                  onScaleUpdate: (details) => _cropGestureUpdate(
+                    details,
+                    source,
+                    scale,
+                    origin,
+                  ),
+                  child: CustomPaint(
+                    painter: _CropPainter(
+                      image: canvas,
+                      crop: crop,
+                      scale: scale,
+                      origin: origin,
                     ),
-                  ],
+                    child: const SizedBox.expand(),
+                  ),
                 );
               },
             ),
@@ -1427,7 +1432,7 @@ class _EditorPageState extends State<EditorPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: Text(
-              _cropHint(),
+              '双指缩放 · 拖动移动 · ×${_cropZoom.toStringAsFixed(2)}',
               textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 fontSize: 10.5,
@@ -1440,87 +1445,50 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
-  String _cropHint() {
-    final crop = _cropDraft;
-    final aspect = crop.aspect(
-      _cropCanvas?.width.toDouble() ?? 1,
-      _cropCanvas?.height.toDouble() ?? 1,
-    );
-    final ratio = aspect >= 1
-        ? '${aspect.toStringAsFixed(2)} : 1'
-        : '1 : ${(1 / aspect).toStringAsFixed(2)}';
-    final lock = _cropAspectLock;
-    return '拖边角调整 · $ratio${lock != null ? ' · 已锁片门比例' : ''}';
+  /// How far in the gate currently is, relative to the largest fit.
+  double get _cropZoom {
+    final format = _format;
+    if (format == null) return 1;
+    final base =
+        centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
+    return base.width <= 0 ? 1 : base.width / _cropBox.width;
   }
 
-  /// When the rebate is drawn the frame has to be the gate's shape, so the
-  /// window keeps the format's ratio. Without 片边 the crop is free.
-  double? get _cropAspectLock {
-    if (!_overscanOn) return null;
-    return _format?.ratio;
-  }
-
-  void _cropGestureStart(Offset point, Rect window) {
-    _cropGestureScale = 1;
-    _activeHandle = _handleAt(point, window);
-  }
-
-  void _cropGestureUpdate(ScaleUpdateDetails details, Rect frame) {
-    // Two fingers always mean scale, wherever they land.
+  void _cropGestureUpdate(
+    ScaleUpdateDetails details,
+    Size source,
+    double scale,
+    Offset origin,
+  ) {
     if (details.pointerCount >= 2) {
-      final factor = _cropGestureScale == 0
+      // Pinch: zoom the gate about the point between the fingers.
+      final factor = _cropGestureScale <= 0
           ? 1.0
           : details.scale / _cropGestureScale;
       _cropGestureScale = details.scale;
       if ((factor - 1).abs() < 0.001) return;
-      setState(() => _cropDraft = scaleCrop(_cropDraft, factor));
+      final focal = Offset(
+        ((details.localFocalPoint.dx - origin.dx) / (source.width * scale))
+            .clamp(0.0, 1.0),
+        ((details.localFocalPoint.dy - origin.dy) / (source.height * scale))
+            .clamp(0.0, 1.0),
+      );
+      setState(() => _cropDraft = zoomGate(_cropDraft, factor, focal));
       return;
     }
-
+    // One finger drags the picture; the gate moves the other way.
     final delta = details.focalPointDelta;
     if (delta == Offset.zero) return;
-    final dx = delta.dx / frame.width;
-    final dy = delta.dy / frame.height;
-
+    final crop = _cropDraft;
     setState(() {
-      final handle = _activeHandle;
-      if (handle == null) {
-        _cropDraft = _cropDraft.shifted(dx, dy);
-      } else {
-        _cropDraft = resizeCrop(
-          _cropDraft,
-          handle,
-          dx,
-          dy,
-          lockedAspect: _cropAspectLock,
-        );
-      }
+      _cropDraft = _cropDraft.shifted(
+        -delta.dx / (source.width * scale * crop.width),
+        -delta.dy / (source.height * scale * crop.height),
+      );
     });
   }
 
-  /// Which grip the finger landed on, or null for "inside the window".
-  CropHandle? _handleAt(Offset point, Rect window) {
-    const grab = 26.0;
-    final nearLeft = (point.dx - window.left).abs() <= grab;
-    final nearRight = (point.dx - window.right).abs() <= grab;
-    final nearTop = (point.dy - window.top).abs() <= grab;
-    final nearBottom = (point.dy - window.bottom).abs() <= grab;
-    final withinX = point.dx >= window.left - grab && point.dx <= window.right + grab;
-    final withinY = point.dy >= window.top - grab && point.dy <= window.bottom + grab;
-
-    if (nearLeft && nearTop) return CropHandle.topLeft;
-    if (nearRight && nearTop) return CropHandle.topRight;
-    if (nearLeft && nearBottom) return CropHandle.bottomLeft;
-    if (nearRight && nearBottom) return CropHandle.bottomRight;
-    if (nearTop && withinX) return CropHandle.top;
-    if (nearBottom && withinX) return CropHandle.bottom;
-    if (nearLeft && withinY) return CropHandle.left;
-    if (nearRight && withinY) return CropHandle.right;
-    return null;
-  }
-
-  /// Fit [source] inside [box], centred. The crop window is expressed relative
-  /// to this rect, so it never depends on the viewport's shape.
+  /// Fit [source] inside [box], centred.
   Rect _containRect(Size box, Size source) {
     if (source.width <= 0 || source.height <= 0) return Offset.zero & box;
     final scale = math.min(box.width / source.width, box.height / source.height);
@@ -2458,19 +2426,7 @@ class _EditorPageState extends State<EditorPage> {
         value: _overscanOn,
         enabled: enabled && format != null,
         onChanged: (value) {
-          setState(() {
-            _overscanOn = value;
-            // The rebate has to be the gate's shape, so a free crop cannot
-            // survive it. Snap back to the centred gate instead of letting
-            // spk_reprint fail with "is not the gate's shape".
-            if (value && format != null) {
-              final current = _cropBox;
-              final gate = current.aspect(_sourceWidth.toDouble(), _sourceHeight.toDouble());
-              if ((gate - format.ratio).abs() / format.ratio > 0.05) {
-                _crop = null;
-              }
-            }
-          });
+          setState(() => _overscanOn = value);
           _applyFrame(label: value ? '铺片边…' : '收片边…');
         },
       ),
@@ -3366,39 +3322,45 @@ class _FrameMarkPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// The picture, dimmed outside the crop window, with the window outlined and
-/// its eight grips drawn. Everything is in viewport coordinates: [frame] is
-/// where the picture landed and [crop] is normalised against it.
+/// The picture drawn at [origin] and [scale], with the part outside the gate
+/// dimmed and the gate outlined with thirds. The gate is a fixed rect centred
+/// in the viewport — it never moves; the picture does.
 class _CropPainter extends CustomPainter {
   _CropPainter({
     required this.image,
     required this.crop,
-    required this.frame,
-    this.showHandles = false,
+    required this.scale,
+    required this.origin,
   });
 
   final ui.Image image;
   final CropBox crop;
-  final Rect frame;
-  final bool showHandles;
+  final double scale;
+  final Offset origin;
 
   @override
   void paint(Canvas canvas, Size size) {
     final source = Size(image.width.toDouble(), image.height.toDouble());
+    final destination = Rect.fromLTWH(
+      origin.dx,
+      origin.dy,
+      source.width * scale,
+      source.height * scale,
+    );
+
     canvas.save();
     canvas.clipRect(Offset.zero & size);
     canvas.drawImageRect(
       image,
       Offset.zero & source,
-      frame,
+      destination,
       Paint()..filterQuality = FilterQuality.medium,
     );
 
-    final window = Rect.fromLTWH(
-      frame.left + crop.x * frame.width,
-      frame.top + crop.y * frame.height,
-      crop.width * frame.width,
-      crop.height * frame.height,
+    final window = Rect.fromCenter(
+      center: size.center(Offset.zero),
+      width: crop.width * source.width * scale,
+      height: crop.height * source.height * scale,
     );
 
     final scrim = Path()
@@ -3411,7 +3373,7 @@ class _CropPainter extends CustomPainter {
       window,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
+        ..strokeWidth = 1.4
         ..color = const Color(0xCCF1EAE0),
     );
 
@@ -3426,65 +3388,14 @@ class _CropPainter extends CustomPainter {
       canvas.drawLine(Offset(dx, window.top), Offset(dx, window.bottom), thirds);
       canvas.drawLine(Offset(window.left, dy), Offset(window.right, dy), thirds);
     }
-
-    if (showHandles) _paintHandles(canvas, window);
     canvas.restore();
-  }
-
-  void _paintHandles(Canvas canvas, Rect window) {
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round
-      ..color = const Color(0xFFF1EAE0);
-
-    const arm = 18.0;
-    // Corners: L-shaped brackets that read as "grab here".
-    for (final corner in [
-      (window.topLeft, 1.0, 1.0),
-      (window.topRight, -1.0, 1.0),
-      (window.bottomLeft, 1.0, -1.0),
-      (window.bottomRight, -1.0, -1.0),
-    ]) {
-      final (point, sx, sy) = corner;
-      canvas.drawLine(point, point.translate(arm * sx, 0), paint);
-      canvas.drawLine(point, point.translate(0, arm * sy), paint);
-    }
-
-    // Edge midpoints: a short bar so the sides are visibly draggable too.
-    const bar = 13.0;
-    final mid = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..color = const Color(0xB3F1EAE0);
-    canvas.drawLine(
-      Offset(window.center.dx, window.top),
-      Offset(window.center.dx, window.top + bar),
-      mid,
-    );
-    canvas.drawLine(
-      Offset(window.center.dx, window.bottom),
-      Offset(window.center.dx, window.bottom - bar),
-      mid,
-    );
-    canvas.drawLine(
-      Offset(window.left, window.center.dy),
-      Offset(window.left + bar, window.center.dy),
-      mid,
-    );
-    canvas.drawLine(
-      Offset(window.right, window.center.dy),
-      Offset(window.right - bar, window.center.dy),
-      mid,
-    );
   }
 
   @override
   bool shouldRepaint(_CropPainter oldDelegate) =>
       oldDelegate.image != image ||
-      oldDelegate.frame != frame ||
-      oldDelegate.showHandles != showHandles ||
+      oldDelegate.scale != scale ||
+      oldDelegate.origin != origin ||
       oldDelegate.crop.x != crop.x ||
       oldDelegate.crop.y != crop.y ||
       oldDelegate.crop.width != crop.width ||
