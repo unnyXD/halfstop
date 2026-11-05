@@ -2,7 +2,9 @@
 
 Android 上的物理胶片模拟相机后期应用。Flutter 前端 + Spektrafilm 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在手机上——没有 Python，没有服务端，没有 LUT 近似，光谱计算、coupler、颗粒、光晕全部在 GPU 上现场算。
 
-![引擎自检](docs/engine-selftest.png)
+| 编辑器（Portra 400 + 实时曝光滑块 + 测光） | 画幅：片门、片边与齿孔、日期后背 |
+|---|---|
+| ![编辑器](docs/screenshot-editor.png) | ![画幅](docs/screenshot-frame.png) |
 
 ## 功能
 
