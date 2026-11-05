@@ -130,6 +130,27 @@ class EngineWorker {
     return (result as Map).cast<String, dynamic>();
   }
 
+  /// Opens a session on pixels the app decoded itself (a gallery JPEG).
+  ///
+  /// Skips LibRaw entirely: [pixels] must already be linear ProPhoto RGB
+  /// float32, which `photo_import.dart` produces from sRGB.
+  Future<Map<String, dynamic>> openImage({
+    required String resourcesDir,
+    required Float32List pixels,
+    required int width,
+    required int height,
+    Map<String, Object?> params = const {},
+  }) async {
+    final result = await _call('openImage', {
+      'resourcesDir': resourcesDir,
+      'pixels': TransferableTypedData.fromList([pixels.buffer.asUint8List()]),
+      'width': width,
+      'height': height,
+      'params': params,
+    });
+    return (result as Map).cast<String, dynamic>();
+  }
+
   /// Applies a delta to the live session. The reply's `invalidated` says what
   /// the engine dropped; a live parameter keeps the negative, a shoot-layer
   /// change does not.
@@ -285,6 +306,13 @@ class _NativeSession {
             Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>)>(
       'spk_mobile_open_raw_on',
     );
+    _openImage = library.lookupFunction<
+        Pointer<Void> Function(Pointer<Void>, Pointer<Float>, Uint32, Uint32,
+            Pointer<Utf8>, Pointer<Pointer<Utf8>>),
+        Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
+            Pointer<Utf8>, Pointer<Pointer<Utf8>>)>(
+      'spk_mobile_open_image_on',
+    );
     _sessionRelease = library.lookupFunction<Void Function(Pointer<Void>),
         void Function(Pointer<Void>)>('spk_mobile_session_release');
     _setParams = library.lookupFunction<
@@ -334,7 +362,7 @@ class _NativeSession {
         Pointer<Utf8> Function()>('spk_mobile_build_info');
   }
 
-  static const int _expectedAbi = 3;
+  static const int _expectedAbi = 4;
 
   late final Pointer<Void> Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>)
       _engineCreate;
@@ -342,6 +370,8 @@ class _NativeSession {
   late final int Function(Pointer<Void>, Pointer<Pointer<Utf8>>) _capabilities;
   late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openRaw;
+  late final Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
+      Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openImage;
   late final void Function(Pointer<Void>) _sessionRelease;
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Pointer<Utf8>>)
       _setParams;
@@ -368,6 +398,8 @@ class _NativeSession {
     switch (op) {
       case 'open':
         return _handleOpen(args);
+      case 'openImage':
+        return _handleOpenImage(args);
       case 'setParams':
         return _handleSetParams(args);
       case 'getParams':
@@ -428,6 +460,55 @@ class _NativeSession {
       return _decodeMap(reply);
     } finally {
       malloc.free(rawPtr);
+      malloc.free(paramsPtr);
+      malloc.free(replySlot);
+    }
+  }
+
+  Map<String, dynamic> _handleOpenImage(Map<String, Object?> args) {
+    final resourcesDir = args['resourcesDir'] as String? ?? '';
+    final width = (args['width'] as num?)?.toInt() ?? 0;
+    final height = (args['height'] as num?)?.toInt() ?? 0;
+    final params = (args['params'] as Map?)?.cast<String, Object?>() ?? const {};
+    final pixelsArg = args['pixels'];
+
+    if (resourcesDir.isEmpty) {
+      throw EngineFailure('arguments', 'resourcesDir is empty');
+    }
+    if (width <= 0 || height <= 0 || pixelsArg is! TransferableTypedData) {
+      throw EngineFailure('arguments', 'image buffer is missing or empty');
+    }
+
+    final bytes = pixelsArg.materialize().asUint8List();
+    final count = width * height * 3;
+    if (bytes.lengthInBytes < count * 4) {
+      throw EngineFailure(
+        'arguments',
+        'image buffer has ${bytes.lengthInBytes} bytes, expected ${count * 4}',
+      );
+    }
+
+    _releaseSession();
+    _ensureEngine(resourcesDir);
+
+    final native = malloc<Float>(count);
+    final replySlot = malloc<Pointer<Utf8>>();
+    final paramsPtr = jsonEncode(params).toNativeUtf8();
+    replySlot.value = nullptr;
+    try {
+      native.asTypedList(count).setAll(
+            0,
+            bytes.buffer.asFloat32List(bytes.offsetInBytes, count),
+          );
+      final session = _openImage(_engine, native, width, height, paramsPtr, replySlot);
+      final reply = _takeReply(replySlot);
+      if (session == nullptr) {
+        throw _failureFrom(reply, 'openImage');
+      }
+      _session = session;
+      return _decodeMap(reply);
+    } finally {
+      malloc.free(native);
       malloc.free(paramsPtr);
       malloc.free(replySlot);
     }

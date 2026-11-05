@@ -11,6 +11,7 @@ import 'engine_worker.dart';
 import 'exporter.dart';
 import 'histogram.dart';
 import 'layer2.dart';
+import 'photo_import.dart';
 import 'stock_catalog.dart';
 
 const Color _kBackground = Color(0xFF0B0C0F);
@@ -47,6 +48,7 @@ class _EditorPageState extends State<EditorPage> {
   Timer? _debounce;
 
   String? _error;
+  String? _busyLabel;
   String? _path;
   bool _sessionOpen = false;
   Map<String, dynamic> _openInfo = const {};
@@ -166,7 +168,42 @@ class _EditorPageState extends State<EditorPage> {
         'glare_amount': _glare,
       };
 
+  /// The toolbar's "+" asks which of the two entries to use.
   Future<void> _import() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _kSurface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: _kAccent),
+              title: const Text('从相册选择'),
+              subtitle: const Text('JPEG / PNG / WebP，本机解码后进引擎'),
+              onTap: () => Navigator.of(context).pop('photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.raw_on_outlined, color: _kAccent),
+              title: const Text('RAW 文件'),
+              subtitle: const Text('ARW / DNG / CR2 / CR3 / NEF / RAF…，LibRaw 解码'),
+              onTap: () => Navigator.of(context).pop('raw'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == 'photo') {
+      await _importPhoto();
+    } else if (choice == 'raw') {
+      await _importRaw();
+    }
+  }
+
+  Future<void> _importRaw() async {
     try {
       final path = await EngineBridge.pickRaw();
       if (path != null) await _openPath(path);
@@ -175,11 +212,83 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  Future<void> _importPhoto() async {
+    try {
+      final path = await EngineBridge.pickImage();
+      if (path != null) await _openPhoto(path);
+    } catch (error) {
+      _setError(error);
+    }
+  }
+
+  void _openCached(CachedRaw entry) {
+    if (entry.isPhoto) {
+      _openPhoto(entry.path);
+    } else {
+      _openPath(entry.path);
+    }
+  }
+
+  /// The gallery path. Two decodes happen: Dart turns the JPEG into linear
+  /// ProPhoto, then the engine treats those pixels as if LibRaw had produced
+  /// them — same film model, same sliders, no RAW required.
+  Future<void> _openPhoto(String path) async {
+    if (_worker == null || _resourcesDir == null) return;
+    _debounce?.cancel();
+    setState(() {
+      _busy = true;
+      _busyLabel = '解码图片…';
+      _error = null;
+      _sessionOpen = false;
+      _liveFrames = 0;
+      _showingSource = false;
+    });
+    try {
+      LinearPhoto? photo = await decodeToLinearProPhoto(path);
+      if (!mounted) return;
+      setState(() => _busyLabel = '送进渲染引擎…');
+      final reply = await _worker!.openImage(
+        resourcesDir: _resourcesDir!,
+        pixels: photo.pixels,
+        width: photo.width,
+        height: photo.height,
+        params: {
+          'preview_long_edge': _previewEdge,
+          'film_stock': _film,
+          'print_stock': _paper,
+          ..._liveDelta(),
+          ..._slowDelta(),
+        },
+      );
+      // ~144 MB of float32 at 12 MP; the engine has its own copy now.
+      photo = null;
+      if (!mounted) return;
+      setState(() {
+        _openInfo = reply;
+        _path = path;
+        _sessionOpen = true;
+        _busyLabel = '渲染中…';
+      });
+      final frame = await _worker!.reprint(tier: 'live');
+      await _showFrame(frame, fast: true, wallMs: null);
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _busyLabel = null;
+        });
+      }
+    }
+  }
+
   Future<void> _openPath(String path) async {
     if (_worker == null || _resourcesDir == null) return;
     _debounce?.cancel();
     setState(() {
       _busy = true;
+      _busyLabel = '解码 RAW…';
       _error = null;
       _sessionOpen = false;
       _liveFrames = 0;
@@ -208,7 +317,12 @@ class _EditorPageState extends State<EditorPage> {
     } catch (error) {
       _setError(error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _busyLabel = null;
+        });
+      }
     }
   }
 
@@ -635,7 +749,7 @@ class _EditorPageState extends State<EditorPage> {
               _booting
                   ? '正在启动引擎…'
                   : _path == null
-                      ? '物理胶片模拟 · 选择一张 RAW'
+                      ? '物理胶片模拟 · 相册图片或 RAW'
                       : '${_films.length} 胶片 · ${_papers.length} 相纸 · 实时 ${_previewEdge}px',
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
@@ -735,7 +849,10 @@ class _EditorPageState extends State<EditorPage> {
                     const CircularProgressIndicator(strokeWidth: 2.4),
                     const SizedBox(height: 14),
                     Text(
-                      _booting ? '加载引擎与资源…' : (_quality == PreviewQuality.fine ? '精细渲染中…' : '渲染中…'),
+                      _booting
+                          ? '加载引擎与资源…'
+                          : (_busyLabel ??
+                              (_quality == PreviewQuality.fine ? '精细渲染中…' : '渲染中…')),
                       style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
                     ),
                   ],
@@ -765,13 +882,13 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(height: 18),
             Text(
-              '打开一张 RAW',
+              '选一张照片开始',
               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
-              '解码、胶片、相纸、颗粒和光晕都在本机 Vulkan 上计算。\n'
-              '拖动打印层滑块时只重印缓存的底片。',
+              '相册图片由本机解码后直接进引擎，RAW 交给 LibRaw。\n'
+              '两者走同一套胶片模型，都在本机 Vulkan 上算。',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.6),
             ),
@@ -797,7 +914,7 @@ class _EditorPageState extends State<EditorPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '可在下方切换，选好后打开 RAW 即可',
+                    '可在下方切换，选好后导入即可',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: _kAccent.withValues(alpha: 0.8),
                       fontSize: 10,
@@ -807,10 +924,31 @@ class _EditorPageState extends State<EditorPage> {
               ),
             ),
             const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: _busy || _booting ? null : _import,
-              icon: const Icon(Icons.folder_open_rounded),
-              label: const Text('选择 RAW'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton.icon(
+                  onPressed: _busy || _booting ? null : _importPhoto,
+                  icon: const Icon(Icons.photo_library_outlined, size: 18),
+                  label: const Text('从相册选择'),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: _busy || _booting ? null : _importRaw,
+                  icon: const Icon(Icons.folder_open_rounded, size: 18),
+                  label: const Text('RAW 文件'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '相册支持 JPEG / PNG / WebP；RAW 支持 ARW / DNG / CR2 / CR3 / NEF / RAF / ORF 等',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: _kTextDim,
+                fontSize: 10,
+                height: 1.5,
+              ),
             ),
             if (_cached.isNotEmpty) ...[
               const SizedBox(height: 24),
@@ -823,12 +961,15 @@ class _EditorPageState extends State<EditorPage> {
                 children: [
                   for (final raw in _cached.take(6))
                     ActionChip(
-                      avatar: const Icon(Icons.raw_on_outlined, size: 16),
+                      avatar: Icon(
+                        raw.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
+                        size: 16,
+                      ),
                       label: Text(
                         '${raw.name} · ${raw.sizeLabel}',
                         style: const TextStyle(fontSize: 12),
                       ),
-                      onPressed: _busy || _booting ? null : () => _openPath(raw.path),
+                      onPressed: _busy || _booting ? null : () => _openCached(raw),
                     ),
                 ],
               ),

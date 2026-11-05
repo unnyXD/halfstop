@@ -7,7 +7,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Spektrafilm'), findsOneWidget);
-    expect(find.text('打开一张 RAW'), findsOneWidget);
-    expect(find.text('选择 RAW'), findsOneWidget);
+    expect(find.text('选一张照片开始'), findsOneWidget);
+    expect(find.text('从相册选择'), findsOneWidget);
+    expect(find.text('RAW 文件'), findsOneWidget);
   });
 }

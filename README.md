@@ -16,6 +16,7 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 - [x] 28 个胶片 profile + 相纸 + 打印 LUT 作为 assets 打包，首次启动解压到 `filesDir`
 - [x] Flutter UI ↔ `dart:ffi` ↔ C ABI（参数走 JSON）
 - [x] debug / release APK 都能在 Adreno 650 上启动并创建引擎
+- [x] 两个导入入口：相册图片（Dart 解码 → 直送引擎）与 RAW（LibRaw）
 - [x] RAW 解码（LibRaw 0.22.2，NDK/CMake 原生）
 - [x] 常驻 engine + session（`EngineWorker`，后台 isolate）
 - [x] `spk_set_params` + `spk_reprint` 实时滑块（5 个打印层参数）
@@ -31,6 +32,17 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 - [ ] 导出 TIFF / DNG
 - [ ] 曲线、色轮、裁剪、直方图
 - [ ] 多机型验证（Mali / PowerVR / 其他 Adreno）
+
+## 两个入口
+
+| 入口 | 解码 | 引擎看到的东西 |
+|---|---|---|
+| 从相册选择（JPEG / PNG / WebP / BMP） | Dart 的 `image` 包，纠 EXIF 方向，长边不超过 4096 | 线性 ProPhoto RGB float32 |
+| RAW 文件（ARW / DNG / CR2 / CR3 / NEF / RAF / ORF…） | LibRaw 0.22.2，16 bit 兼容解码 | 同上 |
+
+两条路的汇合点是 `spk_open`：它本来就接受一个线性 RGB 缓冲，LibRaw 只是其中最常用的一个
+解码器。相册图片走 `spk_mobile_open_image_on`，直接跳过 LibRaw；之后的胶片、相纸、
+颗粒、光晕、导出完全一致。
 
 ## 实时调节怎么工作
 
@@ -80,6 +92,7 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 | `lib/exporter.dart` | JPEG 编码 + 相册落盘 |
 | `lib/layer2.dart` | 调色层：颜色矩阵 + 导出时同一套算式 |
 | `lib/histogram.dart` | 直方图采样与绘制 |
+| `lib/photo_import.dart` | 相册图片 → 线性 ProPhoto RGB（引擎的输入格式） |
 | `android/app/src/main/cpp/` | `CMakeLists.txt` + FFI 桥 |
 | `android/app/src/main/kotlin/.../MainActivity.kt` | 首次启动解压 `assets/engine/**` |
 | `third_party/spektrafilm/` | 上游引擎（`tool/fetch-engine.ps1` 拉取，不入库） |

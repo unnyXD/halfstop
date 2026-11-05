@@ -283,7 +283,7 @@ void fail_reply(char** out_json, const char* stage, const std::string& message) 
 extern "C" {
 
 // Bumped whenever this shim's ABI changes; the Dart side asserts on it.
-int32_t spk_mobile_abi_version(void) { return 3; }
+int32_t spk_mobile_abi_version(void) { return 4; }
 
 const char* spk_mobile_build_info(void) { return spk_build_info(); }
 
@@ -356,6 +356,46 @@ int32_t spk_mobile_engine_capabilities(spk_engine* engine, char** out_json) {
 // Opens a RAW on an existing engine. This is the editor's entry point: the
 // engine stays alive for the whole session, so `spk_set_params` + `spk_reprint`
 // can turn a slider into a new frame instead of a full engine restart.
+// Shrinks a linear RGB buffer in place until it fits the device's largest
+// bindable plane. Both open paths need this: a 24 MP ARW is 290 MB at 12 B/px,
+// and a 12 MP phone JPEG is 144 MB, neither of which binds on a small device.
+static void fit_to_max_plane(spk_engine* engine, std::vector<float>& rgb,
+                             uint32_t& width, uint32_t& height,
+                             uint64_t& max_pixels, bool& downscaled,
+                             double& downscale_ms) {
+    max_pixels = 0;
+    downscaled = false;
+    downscale_ms = 0.0;
+
+    const uint64_t max_plane = spk_max_plane_bytes(engine);
+    if (max_plane == 0) return;
+
+    // 5% headroom: rows are padded to the device's linear alignment and the
+    // pipeline keeps intermediates alongside the source plane.
+    max_pixels = static_cast<uint64_t>(static_cast<double>(max_plane) * 0.95 / 12.0);
+    const uint64_t source_pixels = static_cast<uint64_t>(width) * height;
+    if (source_pixels <= max_pixels) return;
+
+    const double factor = std::sqrt(
+        static_cast<double>(max_pixels) / static_cast<double>(source_pixels));
+    uint32_t target_w = std::max(
+        1u, static_cast<uint32_t>(std::floor(width * factor)));
+    uint32_t target_h = std::max(
+        1u, static_cast<uint32_t>(std::floor(height * factor)));
+    while (static_cast<uint64_t>(target_w) * target_h > max_pixels) {
+        if (target_w > target_h) --target_w; else --target_h;
+    }
+
+    const auto scale_start = Clock::now();
+    std::vector<float> scaled;
+    downscale_rgb(rgb, width, height, target_w, target_h, scaled);
+    rgb.swap(scaled);
+    width = target_w;
+    height = target_h;
+    downscaled = true;
+    downscale_ms = elapsed_ms(scale_start);
+}
+
 spk_mobile_session* spk_mobile_open_raw_on(spk_engine* engine, const char* raw_path,
                                            const char* params_json, char** out_json) {
     if (out_json != nullptr) *out_json = nullptr;
@@ -405,35 +445,8 @@ spk_mobile_session* spk_mobile_open_raw_on(spk_engine* engine, const char* raw_p
         uint64_t max_pixels = 0;
         bool downscaled = false;
         double downscale_ms = 0.0;
-
-        if (const uint64_t max_plane = spk_max_plane_bytes(engine); max_plane > 0) {
-            // 5% headroom: rows are padded to the device's linear alignment and
-            // the pipeline keeps intermediates alongside the source plane.
-            max_pixels = static_cast<uint64_t>(
-                static_cast<double>(max_plane) * 0.95 / 12.0);
-            const uint64_t source_pixels =
-                static_cast<uint64_t>(source_width) * source_height;
-            if (source_pixels > max_pixels) {
-                const double factor = std::sqrt(
-                    static_cast<double>(max_pixels) / static_cast<double>(source_pixels));
-                uint32_t target_w = std::max(
-                    1u, static_cast<uint32_t>(std::floor(source_width * factor)));
-                uint32_t target_h = std::max(
-                    1u, static_cast<uint32_t>(std::floor(source_height * factor)));
-                while (static_cast<uint64_t>(target_w) * target_h > max_pixels) {
-                    if (target_w > target_h) --target_w; else --target_h;
-                }
-                const auto scale_start = Clock::now();
-                std::vector<float> scaled;
-                downscale_rgb(decoded.rgb, source_width, source_height,
-                              target_w, target_h, scaled);
-                decoded.rgb.swap(scaled);
-                width = target_w;
-                height = target_h;
-                downscaled = true;
-                downscale_ms = elapsed_ms(scale_start);
-            }
-        }
+        fit_to_max_plane(engine, decoded.rgb, width, height, max_pixels, downscaled,
+                         downscale_ms);
 
         const spk::io::RawMetadata metadata = decoded.metadata;
         const spk::io::RawDecodeTimings decode_timings = decoded.timings;
@@ -503,6 +516,115 @@ spk_mobile_session* spk_mobile_open_raw_on(spk_engine* engine, const char* raw_p
         return nullptr;
     } catch (...) {
         fail_reply(out_json, "internal", "unknown failure in spk_mobile_open_raw_on");
+        return nullptr;
+    }
+}
+
+// Opens a session on pixels the app decoded itself (a JPEG from the gallery,
+// say). LibRaw is skipped entirely: `spk_open` already takes a linear RGB
+// buffer, so the only contract is that the caller hands over linear
+// **ProPhoto RGB** float32, which is what Dart converts sRGB JPEGs into.
+spk_mobile_session* spk_mobile_open_image_on(spk_engine* engine, const float* rgb,
+                                             uint32_t width, uint32_t height,
+                                             const char* params_json, char** out_json) {
+    if (out_json != nullptr) *out_json = nullptr;
+    try {
+        if (engine == nullptr) {
+            fail_reply(out_json, "arguments", "engine is null");
+            return nullptr;
+        }
+        if (rgb == nullptr || width == 0 || height == 0) {
+            fail_reply(out_json, "arguments", "image buffer is empty");
+            return nullptr;
+        }
+
+        spk::Json params = spk::Json::object();
+        if (params_json != nullptr && *params_json != '\0') {
+            std::string parse_error;
+            if (!spk::Json::parse(params_json, params, parse_error)) {
+                fail_reply(out_json, "params", parse_error);
+                return nullptr;
+            }
+            if (!params.is_object()) {
+                fail_reply(out_json, "params", "params_json must be a JSON object");
+                return nullptr;
+            }
+        }
+        params.set("input_color_space", spk::Json(std::string("ProPhoto RGB")));
+        params.set("input_cctf_decoding", spk::Json(false));
+        params.set("output_color_space", spk::Json(std::string("sRGB")));
+        params.set("output_cctf_encoding", spk::Json(true));
+        params.set("extended_dynamic_range", spk::Json(false));
+
+        auto t = Clock::now();
+        const uint32_t source_width = width;
+        const uint32_t source_height = height;
+        const size_t floats = static_cast<size_t>(width) * height * 3;
+        std::vector<float> pixels(rgb, rgb + floats);
+        uint64_t max_pixels = 0;
+        bool downscaled = false;
+        double downscale_ms = 0.0;
+        fit_to_max_plane(engine, pixels, width, height, max_pixels, downscaled,
+                         downscale_ms);
+
+        const std::string params_text = params.dump();
+        spk_image input{pixels.data(), width, height, 3};
+        char* open_reply = nullptr;
+        t = Clock::now();
+        spk_session* session = spk_open(engine, &input, params_text.c_str(), &open_reply);
+        const double open_ms = elapsed_ms(t);
+        if (session == nullptr) {
+            const std::string message = spk_last_error(engine);
+            if (open_reply != nullptr) spk_string_free(open_reply);
+            fail_reply(out_json, "open", message);
+            return nullptr;
+        }
+        std::vector<float>().swap(pixels);
+
+        spk::Json reply = spk::Json::object();
+        reply.set("ok", spk::Json(true));
+        reply.set("max_plane_bytes", spk::Json(double(spk_max_plane_bytes(engine))));
+
+        spk::Json in = spk::Json::object();
+        in.set("path", spk::Json(std::string()));
+        in.set("source", spk::Json(std::string("photo")));
+        in.set("source_width", spk::Json(double(source_width)));
+        in.set("source_height", spk::Json(double(source_height)));
+        in.set("width", spk::Json(double(width)));
+        in.set("height", spk::Json(double(height)));
+        in.set("downscaled", spk::Json(downscaled));
+        in.set("max_pixels", spk::Json(double(max_pixels)));
+        in.set("make", spk::Json(std::string()));
+        in.set("model", spk::Json(std::string()));
+        in.set("color_space", spk::Json(std::string("ProPhoto RGB")));
+        in.set("transfer", spk::Json(std::string("linear")));
+        reply.set("input", std::move(in));
+
+        spk::Json decode = spk::Json::object();
+        decode.set("mode", spk::Json(std::string("dart-srgb8")));
+        decode.set("libraw", spk::Json(std::string()));
+        decode.set("decoder", spk::Json(std::string("dart image")));
+        reply.set("decode", std::move(decode));
+
+        spk::Json open_value;
+        std::string reply_error;
+        if (open_reply != nullptr && spk::Json::parse(open_reply, open_value, reply_error)) {
+            reply.set("open", std::move(open_value));
+        }
+        if (open_reply != nullptr) spk_string_free(open_reply);
+
+        reply.set("engine_ms", spk::Json(0.0));
+        reply.set("decode_ms", spk::Json(0.0));
+        reply.set("downscale_ms", spk::Json(downscale_ms));
+        reply.set("open_ms", spk::Json(open_ms));
+        if (out_json != nullptr) *out_json = copy_to_c(reply.dump());
+
+        return new spk_mobile_session{engine, session, width, height, /*owns_engine=*/false};
+    } catch (const std::exception& e) {
+        fail_reply(out_json, "internal", e.what());
+        return nullptr;
+    } catch (...) {
+        fail_reply(out_json, "internal", "unknown failure in spk_mobile_open_image_on");
         return nullptr;
     }
 }

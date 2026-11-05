@@ -67,11 +67,22 @@ class RawRender {
 /// A file the user has already imported, kept in the app's cache so switching
 /// tiers does not mean picking it again.
 class CachedRaw {
-  CachedRaw({required this.name, required this.path, required this.size});
+  CachedRaw({
+    required this.name,
+    required this.path,
+    required this.size,
+    this.kind = 'raw',
+  });
 
   final String name;
   final String path;
   final int size;
+
+  /// `raw` (LibRaw decodes it) or `photo` (Dart decodes it, then the engine
+  /// takes the pixels directly).
+  final String kind;
+
+  bool get isPhoto => kind == 'photo';
 
   String get sizeLabel => '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
@@ -180,6 +191,9 @@ class EngineBridge {
   /// the path. `null` means the user dismissed the picker.
   static Future<String?> pickRaw() => _channel.invokeMethod<String>('pickRaw');
 
+  /// Gallery picker for ordinary photos (JPEG / PNG / WebP / BMP).
+  static Future<String?> pickImage() => _channel.invokeMethod<String>('pickImage');
+
   /// Imported files still in `cacheDir/imports`, newest first.
   static Future<List<CachedRaw>> cachedRaws() async {
     final list =
@@ -189,6 +203,7 @@ class EngineBridge {
               name: entry['name'] as String? ?? 'RAW',
               path: entry['path'] as String? ?? '',
               size: (entry['size'] as num?)?.toInt() ?? 0,
+              kind: entry['kind'] as String? ?? 'raw',
             ))
         .where((entry) => entry.path.isNotEmpty)
         .toList();
