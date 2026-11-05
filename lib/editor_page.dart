@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'engine_bridge.dart';
 import 'engine_worker.dart';
 import 'exporter.dart';
+import 'frame_format.dart';
 import 'histogram.dart';
 import 'layer2.dart';
 import 'photo_import.dart';
@@ -95,6 +96,22 @@ class _EditorPageState extends State<EditorPage> {
   Histogram? _histogram;
   bool _showHistogram = true;
   _PanelLayer _panelLayer = _PanelLayer.print;
+
+  /// Frame geometry. Everything here is SHOOT layer in the engine: changing it
+  /// re-develops the negative, so these are "commit on release" controls.
+  FilmFormat? _format;
+  bool _overscanOn = false;
+  /// `strip` lays out the whole film width, `filed` a sliver of rebate.
+  final String _overscanMode = 'strip';
+  String _holes = 'white';
+  String _carrier = 'none';
+  double _edgeFog = 1;
+  double _leaks = 0;
+
+  bool _dateOn = false;
+  String _dateText = '';
+  String _dateStyle = 'lcd';
+  String _datePlacement = 'frame';
 
   @override
   void initState() {
@@ -230,6 +247,159 @@ class _EditorPageState extends State<EditorPage> {
     } catch (error) {
       _setError(error);
     }
+  }
+
+  int get _sourceWidth =>
+      ((_openInfo['input'] as Map?)?['source_width'] as num?)?.toInt() ?? _imageWidth;
+
+  int get _sourceHeight =>
+      ((_openInfo['input'] as Map?)?['source_height'] as num?)?.toInt() ?? _imageHeight;
+
+  /// The crop that makes this frame the selected gate's shape. Null format
+  /// means "leave the frame alone".
+  CropBox get _cropBox {
+    final format = _format;
+    if (format == null) return CropBox.full;
+    return centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
+  }
+
+  Map<String, Object?> _frameDelta() {
+    final crop = _cropBox;
+    return {
+      'geometry_crop_x': crop.x,
+      'geometry_crop_y': crop.y,
+      'geometry_crop_w': crop.width,
+      'geometry_crop_h': crop.height,
+      'overscan_active': _format != null && _overscanOn,
+      if (_format != null) 'overscan_format': _format!.id,
+      'overscan_mode': _overscanMode,
+      'overscan_holes': _holes,
+      'overscan_carrier': _carrier,
+      'overscan_fog': _edgeFog,
+      'overscan_leaks': _leaks,
+      'date_imprint_active': _dateOn,
+      if (_dateOn) 'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
+      if (_dateOn) 'date_imprint_style': _dateStyle,
+      // The rebate only exists when the rebate is drawn.
+      if (_dateOn)
+        'date_imprint_placement':
+            (_format != null && _overscanOn) ? _datePlacement : 'frame',
+    };
+  }
+
+  /// `'26 11 5` — the shape the engine's LCD face expects.
+  static String defaultDateText([DateTime? now]) {
+    final t = now ?? DateTime.now();
+    final yy = (t.year % 100).toString().padLeft(2, '0');
+    return "'$yy ${t.month} ${t.day}";
+  }
+
+  /// Frame changes are SHOOT layer: the negative is re-developed, so this is
+  /// always a deliberate, slow commit rather than a live drag.
+  Future<void> _applyFrame({String? label}) async {
+    if (!_hasSession || _busy) return;
+    // No undo entry: these are single taps with a visible result, and undoing
+    // them would have to re-develop the negative all over again.
+    setState(() {
+      _busy = true;
+      _busyLabel = label ?? '重算底片…';
+    });
+    try {
+      await _worker!.setParams({
+        ..._liveDelta(),
+        ..._slowDelta(),
+        ..._frameDelta(),
+        'film_stock': _film,
+        'print_stock': _paper,
+      });
+      final frame = await _worker!.reprint(tier: 'live');
+      await _showFrame(frame, fast: true, wallMs: null);
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _busyLabel = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickFormat(FilmFormat? format) async {
+    if (format?.id == _format?.id) return;
+    setState(() {
+      _format = format;
+      if (format == null) {
+        _overscanOn = false;
+        _datePlacement = 'frame';
+      }
+    });
+    await _applyFrame(label: format == null ? '恢复原比例…' : '按 ${format.label} 重算…');
+  }
+
+  Future<void> _editDateText() async {
+    final controller = TextEditingController(text: _dateText);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _kSurface,
+        title: const Text('日期后背'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 24,
+          decoration: const InputDecoration(
+            hintText: "'26 11 5",
+            helperText: '按后背的字面写，不自动格式化',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+    setState(() => _dateText = value);
+    await _applyFrame(label: '重打日期…');
+  }
+
+  Future<void> _deleteCached(CachedRaw entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _kSurface,
+        title: const Text('删除导入缓存'),
+        content: Text('${entry.name}\n${entry.sizeLabel}\n\n只删应用内的缓存副本，DCIM 或相册里的原文件不受影响。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC25B5B)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final deleted = await EngineBridge.deleteCached(entry.path);
+    if (!mounted) return;
+    if (!deleted) {
+      _setError('删除失败：${entry.name}');
+      return;
+    }
+    final cached = await EngineBridge.cachedRaws();
+    if (!mounted) return;
+    setState(() {
+      _cached = cached;
+      if (_path == entry.path) _path = null;
+    });
   }
 
   void _openCached(CachedRaw entry) {
@@ -1013,7 +1183,10 @@ class _EditorPageState extends State<EditorPage> {
             ),
             if (_cached.isNotEmpty) ...[
               const SizedBox(height: 24),
-              Text('最近导入', style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim)),
+              Text(
+                '最近导入 · 长按删除',
+                style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim),
+              ),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
@@ -1021,16 +1194,19 @@ class _EditorPageState extends State<EditorPage> {
                 alignment: WrapAlignment.center,
                 children: [
                   for (final raw in _cached.take(6))
-                    ActionChip(
-                      avatar: Icon(
-                        raw.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
-                        size: 16,
+                    GestureDetector(
+                      onLongPress: _busy ? null : () => _deleteCached(raw),
+                      child: ActionChip(
+                        avatar: Icon(
+                          raw.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
+                          size: 16,
+                        ),
+                        label: Text(
+                          '${raw.name} · ${raw.sizeLabel}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        onPressed: _busy || _booting ? null : () => _openCached(raw),
                       ),
-                      label: Text(
-                        '${raw.name} · ${raw.sizeLabel}',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      onPressed: _busy || _booting ? null : () => _openCached(raw),
                     ),
                 ],
               ),
@@ -1071,9 +1247,8 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Widget _buildPanel(ThemeData theme) {
-    final canRender = _hasSession && !_busy;
     final canPick = !_busy;
-    final isPrint = _panelLayer == _PanelLayer.print;
+    final canRender = _hasSession && !_busy;
     return Container(
       decoration: const BoxDecoration(
         color: _kSurface,
@@ -1082,101 +1257,28 @@ class _EditorPageState extends State<EditorPage> {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 320,
+          height: 348,
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                 child: Row(
                   children: [
                     Expanded(child: _buildStockField(theme, film: true, enabled: canPick)),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(child: _buildStockField(theme, film: false, enabled: canPick)),
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                child: Row(
-                  children: [
-                    SegmentedButton<_PanelLayer>(
-                      showSelectedIcon: false,
-                      style: ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
-                      ),
-                      segments: const [
-                        ButtonSegment(value: _PanelLayer.print, label: Text('印片')),
-                        ButtonSegment(value: _PanelLayer.color, label: Text('调色')),
-                      ],
-                      selected: {_panelLayer},
-                      onSelectionChanged: (selection) =>
-                          setState(() => _panelLayer = selection.first),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: _showHistogram ? '隐藏直方图' : '显示直方图',
-                      onPressed: () => setState(() => _showHistogram = !_showHistogram),
-                      icon: Icon(
-                        _showHistogram ? Icons.bar_chart_rounded : Icons.bar_chart_outlined,
-                        size: 18,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                      color: _kTextDim,
-                    ),
-                    TextButton.icon(
-                      onPressed: canRender ? (isPrint ? _resetLive : _resetColor) : null,
-                      icon: const Icon(Icons.restart_alt, size: 16),
-                      label: const Text('重置'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        foregroundColor: _kTextDim,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isPrint)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                  child: Row(
-                    children: [
-                      SegmentedButton<PreviewQuality>(
-                        showSelectedIcon: false,
-                        style: ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
-                        ),
-                        segments: const [
-                          ButtonSegment(value: PreviewQuality.fast, label: Text('实时 1600')),
-                          ButtonSegment(value: PreviewQuality.fine, label: Text('精细 3400')),
-                        ],
-                        selected: {_quality},
-                        onSelectionChanged: _busy
-                            ? null
-                            : (selection) {
-                                final quality = selection.first;
-                                setState(() => _quality = quality);
-                                if (quality == PreviewQuality.fine) {
-                                  _renderFine();
-                                } else if (_hasSession) {
-                                  // Back to live: one cheap frame so the pixels
-                                  // match the mode the badge now claims.
-                                  _requestLive();
-                                }
-                              },
-                      ),
-                    ],
-                  ),
-                ),
+              _buildTabs(theme, canRender),
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(8, 2, 8, 12),
-                  children: isPrint
-                      ? _printSliders(theme, canRender)
-                      : _colorSliders(theme, canRender),
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                  children: switch (_panelLayer) {
+                    _PanelLayer.print => _printSliders(theme, canRender),
+                    _PanelLayer.color => _colorSliders(theme, canRender),
+                    _PanelLayer.frame => _frameControls(theme, canRender),
+                  },
                 ),
               ),
             ],
@@ -1186,9 +1288,409 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
+  /// Three tabs, a histogram toggle and one reset that always means "reset
+  /// what you are looking at".
+  Widget _buildTabs(ThemeData theme, bool canRender) {
+    Widget tab(_PanelLayer layer, String label) {
+      final selected = _panelLayer == layer;
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => setState(() => _panelLayer = layer),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: selected ? _kAccent : _kTextDim,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 3),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                height: 2,
+                width: selected ? 20 : 0,
+                decoration: BoxDecoration(
+                  color: _kAccent,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+      child: Row(
+        children: [
+          tab(_PanelLayer.print, '印片'),
+          tab(_PanelLayer.color, '调色'),
+          tab(_PanelLayer.frame, '画幅'),
+          const Spacer(),
+          IconButton(
+            tooltip: _showHistogram ? '隐藏直方图' : '显示直方图',
+            onPressed: () => setState(() => _showHistogram = !_showHistogram),
+            icon: Icon(
+              _showHistogram ? Icons.bar_chart_rounded : Icons.bar_chart_outlined,
+              size: 18,
+            ),
+            visualDensity: VisualDensity.compact,
+            color: _kTextDim,
+          ),
+          TextButton(
+            onPressed: canRender
+                ? () {
+                    switch (_panelLayer) {
+                      case _PanelLayer.print:
+                        _resetLive();
+                      case _PanelLayer.color:
+                        _resetColor();
+                      case _PanelLayer.frame:
+                        _resetFrame();
+                    }
+                  }
+                : null,
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              foregroundColor: _kTextDim,
+              minimumSize: const Size(48, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+            child: const Text('重置'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The frame page: gate, rebate, date back. Every control here re-develops
+  /// the negative, which is why they commit on change instead of on drag.
+  List<Widget> _frameControls(ThemeData theme, bool canRender) {
+    final enabled = _hasSession && !_busy;
+    final format = _format;
+    final crop = _cropBox;
+
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(10, 12, 10, 6),
+        child: Text(
+          '画幅决定片门尺寸，也决定颗粒相对于画面的粗细；选画幅会按片门比例居中裁剪。',
+          style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.4),
+        ),
+      ),
+      SizedBox(
+        height: 34,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          children: [
+            _formatChip(theme, null, '原图', enabled),
+            for (final option in kFilmFormats)
+              _formatChip(theme, option, option.label, enabled),
+          ],
+        ),
+      ),
+      if (format != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          child: Text(
+            '${format.note} · '
+            '裁剪保留 ${(crop.width * 100).round()}% × ${(crop.height * 100).round()}%',
+            style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+          ),
+        ),
+      const SizedBox(height: 6),
+      _switchRow(
+        theme,
+        '片边与齿孔',
+        subtitle: format == null ? '先选画幅' : '在画面外铺出胶片边缘',
+        value: _overscanOn,
+        enabled: enabled && format != null,
+        onChanged: (value) {
+          setState(() => _overscanOn = value);
+          _applyFrame(label: value ? '铺片边…' : '收片边…');
+        },
+      ),
+      if (format != null && _overscanOn) ...[
+        _choiceRow(
+          theme,
+          '齿孔',
+          const ['white', 'black'],
+          const ['白（扫描）', '黑（暗房）'],
+          _holes,
+          enabled,
+          (value) {
+            setState(() => _holes = value);
+            _applyFrame(label: '换齿孔…');
+          },
+        ),
+        _choiceRow(
+          theme,
+          '片基外',
+          const ['none', 'black', 'open'],
+          const ['无', '黑场', '透光'],
+          _carrier,
+          enabled,
+          (value) {
+            setState(() => _carrier = value);
+            _applyFrame(label: '换片基…');
+          },
+        ),
+        _sliderRow(
+          theme,
+          label: '边雾',
+          valueLabel: _edgeFog.toStringAsFixed(1),
+          value: _edgeFog,
+          min: 0,
+          max: 4,
+          enabled: enabled,
+          onChanged: (value) => setState(() => _edgeFog = value),
+          onChangeEnd: (_) => _applyFrame(label: '改边雾…'),
+        ),
+        _sliderRow(
+          theme,
+          label: '漏光',
+          valueLabel: _leaks.toStringAsFixed(1),
+          value: _leaks,
+          min: 0,
+          max: 4,
+          enabled: enabled,
+          onChanged: (value) => setState(() => _leaks = value),
+          onChangeEnd: (_) => _applyFrame(label: '加漏光…'),
+        ),
+      ],
+      const Divider(height: 26, color: Color(0xFF23262E)),
+      _switchRow(
+        theme,
+        '日期后背',
+        subtitle: '把日期烧进画面',
+        value: _dateOn,
+        enabled: enabled,
+        onChanged: (value) {
+          setState(() => _dateOn = value);
+          _applyFrame(label: value ? '打日期…' : '去掉日期…');
+        },
+      ),
+      if (_dateOn) ...[
+        _tapRow(
+          theme,
+          '日期',
+          _dateText.isEmpty ? defaultDateText() : _dateText,
+          enabled,
+          _editDateText,
+        ),
+        _choiceRow(
+          theme,
+          '字体',
+          const ['lcd', 'dots', 'data'],
+          const ['液晶', '点阵', '数据'],
+          _dateStyle,
+          enabled,
+          (value) {
+            setState(() => _dateStyle = value);
+            _applyFrame(label: '换字体…');
+          },
+        ),
+        _choiceRow(
+          theme,
+          '位置',
+          const ['frame', 'rebate'],
+          const ['画面内', '片边上'],
+          _datePlacement,
+          enabled && format != null && _overscanOn,
+          (value) {
+            setState(() => _datePlacement = value);
+            _applyFrame(label: '挪日期…');
+          },
+        ),
+      ],
+    ];
+  }
+
+  Widget _formatChip(ThemeData theme, FilmFormat? format, String label, bool enabled) {
+    final selected = _format?.id == format?.id;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: enabled ? () => _pickFormat(format) : null,
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 13),
+          decoration: BoxDecoration(
+            color: selected ? _kAccent.withValues(alpha: 0.18) : _kSurfaceHigh,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? _kAccent : const Color(0xFF2A2E37),
+            ),
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: selected ? _kAccent : theme.colorScheme.onSurface,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _switchRow(
+    ThemeData theme,
+    String label, {
+    required String subtitle,
+    required bool value,
+    required bool enabled,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: theme.textTheme.bodyMedium),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: enabled ? onChanged : null,
+            activeThumbColor: _kAccent,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _choiceRow(
+    ThemeData theme,
+    String label,
+    List<String> values,
+    List<String> labels,
+    String selected,
+    bool enabled,
+    ValueChanged<String> onChanged,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 58,
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
+            ),
+          ),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              children: [
+                for (var i = 0; i < values.length; i++)
+                  ChoiceChip(
+                    label: Text(labels[i], style: const TextStyle(fontSize: 11)),
+                    selected: selected == values[i],
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    selectedColor: _kAccent.withValues(alpha: 0.2),
+                    labelStyle: TextStyle(
+                      color: selected == values[i] ? _kAccent : theme.colorScheme.onSurface,
+                    ),
+                    onSelected: enabled ? (_) => onChanged(values[i]) : null,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tapRow(
+    ThemeData theme,
+    String label,
+    String value,
+    bool enabled,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 58,
+              child: Text(
+                label,
+                style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
+              ),
+            ),
+            Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
+            const Icon(Icons.edit_outlined, size: 16, color: _kTextDim),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _resetFrame() {
+    setState(() {
+      _format = null;
+      _overscanOn = false;
+      _dateOn = false;
+      _datePlacement = 'frame';
+    });
+    _applyFrame(label: '恢复原比例…');
+  }
+
   /// Layer 1 controls: every one of these ends in an engine reprint.
   List<Widget> _printSliders(ThemeData theme, bool canRender) {
     return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+        child: Row(
+          children: [
+            SegmentedButton<PreviewQuality>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
+              ),
+              segments: const [
+                ButtonSegment(value: PreviewQuality.fast, label: Text('实时 1600')),
+                ButtonSegment(value: PreviewQuality.fine, label: Text('精细 3400')),
+              ],
+              selected: {_quality},
+              onSelectionChanged: _busy
+                  ? null
+                  : (selection) {
+                      final quality = selection.first;
+                      setState(() => _quality = quality);
+                      if (quality == PreviewQuality.fine) {
+                        _renderFine();
+                      } else if (_hasSession) {
+                        _requestLive();
+                      }
+                    },
+            ),
+          ],
+        ),
+      ),
       _sliderRow(
         theme,
         label: '模拟强度',
@@ -1642,7 +2144,7 @@ class _EditorPageState extends State<EditorPage> {
 ///
 /// `print` is the enlarger/film side and costs an engine reprint; `color` is
 /// Layer 2 and costs nothing but a repaint.
-enum _PanelLayer { print, color }
+enum _PanelLayer { print, color, frame }
 
 /// Draws the frame with the Layer 2 colour matrix, keeping the fit the old
 /// `RawImage` had. `colorFilter` is a GPU operation, so dragging a Layer 2

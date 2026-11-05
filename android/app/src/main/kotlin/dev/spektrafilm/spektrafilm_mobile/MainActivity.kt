@@ -62,6 +62,14 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "cachedRaws" -> result.success(listCachedRaws())
+                    "deleteCachedRaw" -> {
+                        val path = call.argument<String>("path")
+                        if (path == null) {
+                            result.error("arguments", "path is required", null)
+                        } else {
+                            result.success(deleteCachedRaw(path))
+                        }
+                    }
                     "copyExif" -> {
                         val source = call.argument<String>("source")
                         val destination = call.argument<String>("destination")
@@ -159,6 +167,27 @@ class MainActivity : FlutterActivity() {
                 "kind" to if (isRawName(it.name)) "raw" else "photo",
             )
         }
+    }
+
+    /**
+     * Deletes one file from the import cache.
+     *
+     * The path arrives from Dart, so it is checked against the cache directory
+     * first: nothing outside `imports/` can be removed through this method.
+     */
+    private fun deleteCachedRaw(path: String): Boolean {
+        val file = File(path)
+        val directories = listOfNotNull(
+            externalCacheDir?.let { File(it, "imports") },
+            File(cacheDir, "imports"),
+        ).map { it.canonicalFile }
+        val canonical = try {
+            file.canonicalFile
+        } catch (e: Exception) {
+            return false
+        }
+        if (directories.none { canonical.parentFile == it }) return false
+        return canonical.delete()
     }
 
     /** What LibRaw can actually open. A phone's camera roll is full of JPEGs. */

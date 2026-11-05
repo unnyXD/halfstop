@@ -194,6 +194,14 @@ class EngineBridge {
   /// Gallery picker for ordinary photos (JPEG / PNG / WebP / BMP).
   static Future<String?> pickImage() => _channel.invokeMethod<String>('pickImage');
 
+  /// Removes one file from the import cache. The native side refuses anything
+  /// outside `imports/`, so a bad path cannot delete user photos.
+  static Future<bool> deleteCached(String path) async {
+    final deleted =
+        await _channel.invokeMethod<bool>('deleteCachedRaw', {'path': path});
+    return deleted ?? false;
+  }
+
   /// Copies shooting data from the imported file onto an exported JPEG.
   ///
   /// Returns how many tags were carried over; 0 means the source had none the
