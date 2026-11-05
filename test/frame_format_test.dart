@@ -5,6 +5,7 @@ import 'package:halfstop/frame_format.dart';
 /// the crop has to be right before the request is ever sent.
 void main() {
   _cropPlacementTests();
+  _cropResizeTests();
 
   test('a 3:2 camera frame barely moves for 135, and not at all for 6x9', () {
     // 135's gate is 36.25 × 24.3 — 0.55% off 3:2, so the crop is a sliver.
@@ -112,5 +113,54 @@ void _cropPlacementTests() {
     final crop = centreCropForRatio(1.0, 6000, 4000).shifted(0.1, 0);
     expect(crop.isCentred, isFalse);
     expect(crop.placementLabel, contains('水平'));
+  });
+}
+
+void _cropResizeTests() {
+  const crop = CropBox(0.2, 0.2, 0.6, 0.6);
+
+  test('dragging the right edge only moves the right edge', () {
+    final resized = resizeCrop(crop, CropHandle.right, 0.1, 0);
+    expect(resized.x, closeTo(0.2, 1e-9));
+    expect(resized.width, closeTo(0.7, 1e-9));
+    expect(resized.height, closeTo(0.6, 1e-9));
+  });
+
+  test('dragging a corner moves both of its edges', () {
+    final resized = resizeCrop(crop, CropHandle.topLeft, 0.05, 0.05);
+    expect(resized.x, closeTo(0.25, 1e-9));
+    expect(resized.y, closeTo(0.25, 1e-9));
+    expect(resized.width, closeTo(0.55, 1e-9));
+    expect(resized.height, closeTo(0.55, 1e-9));
+  });
+
+  test('the window cannot be dragged past the frame', () {
+    final resized = resizeCrop(crop, CropHandle.right, 5, 0);
+    expect(resized.x + resized.width, closeTo(1.0, 1e-9));
+    final shrunk = resizeCrop(crop, CropHandle.right, -5, 0);
+    expect(shrunk.width, greaterThanOrEqualTo(0.08));
+  });
+
+  test('a locked aspect keeps the ratio while resizing', () {
+    // A 3:1 gate on a 3:2 frame: w/h must be 3 * 2 / 3 = 2 in normalised units.
+    final start = const CropBox(0.1, 0.1, 0.5, 0.5);
+    final resized = resizeCrop(
+      start,
+      CropHandle.right,
+      0.2,
+      0,
+      lockedAspect: 3.0,
+      frameWidth: 3.0,
+      frameHeight: 2.0,
+    );
+    expect(resized.width / resized.height, closeTo(2.0, 0.01));
+    // The dragged edge moved; the opposite one stayed.
+    expect(resized.x, closeTo(0.1, 1e-9));
+  });
+
+  test('pinch scales about the centre', () {
+    final scaled = scaleCrop(crop, 0.5);
+    expect(scaled.width, closeTo(0.3, 1e-9));
+    expect(scaled.centerX, closeTo(crop.centerX, 1e-9));
   });
 }

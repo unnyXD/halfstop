@@ -137,6 +137,10 @@ class _EditorPageState extends State<EditorPage> {
   bool _cropping = false;
   CropBox _cropDraft = CropBox.full;
   ui.Image? _cropCanvas;
+
+  /// Which grip a crop gesture grabbed, and the pinch progress so far.
+  CropHandle? _activeHandle;
+  double _cropGestureScale = 1;
   bool _overscanOn = false;
   /// `strip` lays out the whole film width, `filed` a sliver of rebate.
   final String _overscanMode = 'strip';
@@ -1356,12 +1360,12 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
-  /// Crop mode.
+  /// Crop mode: the whole picture, a window you can drag by its edges, corners
+  /// or middle, and pinch to scale.
   ///
-  /// The window fills most of the viewport and the picture overflows it, the
-  /// way a crop screen is supposed to work: you drag the image, the window
-  /// stays put. Showing the whole frame instead would shrink a 3:2 photo to a
-  /// thumbnail on a phone held upright.
+  /// Free ratios are allowed — the engine only cares about the gate's shape
+  /// when the rebate is drawn, so the lock appears with 片边 and disappears
+  /// without it.
   Widget _buildCropPreview(ThemeData theme) {
     final canvas = _cropCanvas;
     if (canvas == null) return const SizedBox.expand();
@@ -1379,42 +1383,43 @@ class _EditorPageState extends State<EditorPage> {
           Expanded(
             child: LayoutBuilder(
               builder: (context, box) {
-                final crop = _cropDraft;
-                final frameW = canvas.width.toDouble();
-                final frameH = canvas.height.toDouble();
-                final windowW = crop.width * frameW;
-                final windowH = crop.height * frameH;
-                if (windowW <= 0 || windowH <= 0) {
-                  return const SizedBox.shrink();
-                }
-                // 92%: the picture stays visible on every side of the window,
-                // which is what makes panning legible.
-                final scale = math.min(
-                  box.maxWidth * 0.92 / windowW,
-                  box.maxHeight * 0.92 / windowH,
+                final frame = _containRect(
+                  box.biggest,
+                  Size(canvas.width.toDouble(), canvas.height.toDouble()),
                 );
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanUpdate: (details) => setState(() {
-                    _cropDraft = _cropDraft.shifted(
-                      details.delta.dx / (frameW * scale),
-                      details.delta.dy / (frameH * scale),
-                    );
-                  }),
-                  child: CustomPaint(
-                    painter: _CropPainter(
-                      image: canvas,
-                      crop: crop,
-                      scale: scale,
-                      origin: Offset(
-                        box.maxWidth / 2 -
-                            (crop.x + crop.width / 2) * frameW * scale,
-                        box.maxHeight / 2 -
-                            (crop.y + crop.height / 2) * frameH * scale,
+                final crop = _cropDraft;
+                final window = Rect.fromLTWH(
+                  frame.left + crop.x * frame.width,
+                  frame.top + crop.y * frame.height,
+                  crop.width * frame.width,
+                  crop.height * frame.height,
+                );
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onScaleStart: (details) => _cropGestureStart(
+                          details.localFocalPoint,
+                          window,
+                        ),
+                        onScaleUpdate: (details) => _cropGestureUpdate(
+                          details,
+                          frame,
+                        ),
+                        onScaleEnd: (_) => _activeHandle = null,
+                        child: CustomPaint(
+                          painter: _CropPainter(
+                            image: canvas,
+                            crop: crop,
+                            frame: frame,
+                            showHandles: true,
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
                       ),
                     ),
-                    child: const SizedBox.expand(),
-                  ),
+                  ],
                 );
               },
             ),
@@ -1422,7 +1427,7 @@ class _EditorPageState extends State<EditorPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: Text(
-              '拖动画面 · ${_cropDraft.placementLabel}',
+              _cropHint(),
               textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 fontSize: 10.5,
@@ -1432,6 +1437,100 @@ class _EditorPageState extends State<EditorPage> {
           ),
         ],
       ),
+    );
+  }
+
+  String _cropHint() {
+    final crop = _cropDraft;
+    final aspect = crop.aspect(
+      _cropCanvas?.width.toDouble() ?? 1,
+      _cropCanvas?.height.toDouble() ?? 1,
+    );
+    final ratio = aspect >= 1
+        ? '${aspect.toStringAsFixed(2)} : 1'
+        : '1 : ${(1 / aspect).toStringAsFixed(2)}';
+    final lock = _cropAspectLock;
+    return '拖边角调整 · $ratio${lock != null ? ' · 已锁片门比例' : ''}';
+  }
+
+  /// When the rebate is drawn the frame has to be the gate's shape, so the
+  /// window keeps the format's ratio. Without 片边 the crop is free.
+  double? get _cropAspectLock {
+    if (!_overscanOn) return null;
+    return _format?.ratio;
+  }
+
+  void _cropGestureStart(Offset point, Rect window) {
+    _cropGestureScale = 1;
+    _activeHandle = _handleAt(point, window);
+  }
+
+  void _cropGestureUpdate(ScaleUpdateDetails details, Rect frame) {
+    // Two fingers always mean scale, wherever they land.
+    if (details.pointerCount >= 2) {
+      final factor = _cropGestureScale == 0
+          ? 1.0
+          : details.scale / _cropGestureScale;
+      _cropGestureScale = details.scale;
+      if ((factor - 1).abs() < 0.001) return;
+      setState(() => _cropDraft = scaleCrop(_cropDraft, factor));
+      return;
+    }
+
+    final delta = details.focalPointDelta;
+    if (delta == Offset.zero) return;
+    final dx = delta.dx / frame.width;
+    final dy = delta.dy / frame.height;
+
+    setState(() {
+      final handle = _activeHandle;
+      if (handle == null) {
+        _cropDraft = _cropDraft.shifted(dx, dy);
+      } else {
+        _cropDraft = resizeCrop(
+          _cropDraft,
+          handle,
+          dx,
+          dy,
+          lockedAspect: _cropAspectLock,
+        );
+      }
+    });
+  }
+
+  /// Which grip the finger landed on, or null for "inside the window".
+  CropHandle? _handleAt(Offset point, Rect window) {
+    const grab = 26.0;
+    final nearLeft = (point.dx - window.left).abs() <= grab;
+    final nearRight = (point.dx - window.right).abs() <= grab;
+    final nearTop = (point.dy - window.top).abs() <= grab;
+    final nearBottom = (point.dy - window.bottom).abs() <= grab;
+    final withinX = point.dx >= window.left - grab && point.dx <= window.right + grab;
+    final withinY = point.dy >= window.top - grab && point.dy <= window.bottom + grab;
+
+    if (nearLeft && nearTop) return CropHandle.topLeft;
+    if (nearRight && nearTop) return CropHandle.topRight;
+    if (nearLeft && nearBottom) return CropHandle.bottomLeft;
+    if (nearRight && nearBottom) return CropHandle.bottomRight;
+    if (nearTop && withinX) return CropHandle.top;
+    if (nearBottom && withinX) return CropHandle.bottom;
+    if (nearLeft && withinY) return CropHandle.left;
+    if (nearRight && withinY) return CropHandle.right;
+    return null;
+  }
+
+  /// Fit [source] inside [box], centred. The crop window is expressed relative
+  /// to this rect, so it never depends on the viewport's shape.
+  Rect _containRect(Size box, Size source) {
+    if (source.width <= 0 || source.height <= 0) return Offset.zero & box;
+    final scale = math.min(box.width / source.width, box.height / source.height);
+    final width = source.width * scale;
+    final height = source.height * scale;
+    return Rect.fromLTWH(
+      (box.width - width) / 2,
+      (box.height - height) / 2,
+      width,
+      height,
     );
   }
 
@@ -2359,7 +2458,19 @@ class _EditorPageState extends State<EditorPage> {
         value: _overscanOn,
         enabled: enabled && format != null,
         onChanged: (value) {
-          setState(() => _overscanOn = value);
+          setState(() {
+            _overscanOn = value;
+            // The rebate has to be the gate's shape, so a free crop cannot
+            // survive it. Snap back to the centred gate instead of letting
+            // spk_reprint fail with "is not the gate's shape".
+            if (value && format != null) {
+              final current = _cropBox;
+              final gate = current.aspect(_sourceWidth.toDouble(), _sourceHeight.toDouble());
+              if ((gate - format.ratio).abs() / format.ratio > 0.05) {
+                _crop = null;
+              }
+            }
+          });
           _applyFrame(label: value ? '铺片边…' : '收片边…');
         },
       ),
@@ -3255,80 +3366,125 @@ class _FrameMarkPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// The picture under a fixed crop window: the image is drawn at [scale] and
-/// [origin] (which the caller computes so the window sits in the middle), the
-/// outside is dimmed, and the window gets a hairline plus thirds.
+/// The picture, dimmed outside the crop window, with the window outlined and
+/// its eight grips drawn. Everything is in viewport coordinates: [frame] is
+/// where the picture landed and [crop] is normalised against it.
 class _CropPainter extends CustomPainter {
   _CropPainter({
     required this.image,
     required this.crop,
-    required this.scale,
-    required this.origin,
+    required this.frame,
+    this.showHandles = false,
   });
 
   final ui.Image image;
   final CropBox crop;
-  final double scale;
-  final Offset origin;
+  final Rect frame;
+  final bool showHandles;
 
   @override
   void paint(Canvas canvas, Size size) {
     final source = Size(image.width.toDouble(), image.height.toDouble());
-    final destination = Rect.fromLTWH(
-      origin.dx,
-      origin.dy,
-      source.width * scale,
-      source.height * scale,
-    );
-
     canvas.save();
     canvas.clipRect(Offset.zero & size);
     canvas.drawImageRect(
       image,
       Offset.zero & source,
-      destination,
+      frame,
       Paint()..filterQuality = FilterQuality.medium,
     );
 
-    final window = Rect.fromCenter(
-      center: size.center(Offset.zero),
-      width: crop.width * source.width * scale,
-      height: crop.height * source.height * scale,
+    final window = Rect.fromLTWH(
+      frame.left + crop.x * frame.width,
+      frame.top + crop.y * frame.height,
+      crop.width * frame.width,
+      crop.height * frame.height,
     );
 
     final scrim = Path()
       ..addRect(Offset.zero & size)
       ..addRect(window)
       ..fillType = PathFillType.evenOdd;
-    canvas.drawPath(scrim, Paint()..color = const Color(0xB30A0908));
+    canvas.drawPath(scrim, Paint()..color = const Color(0xC40A0908));
 
     canvas.drawRect(
       window,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4
-        ..color = const Color(0xFFF1EAE0),
+        ..strokeWidth = 1.2
+        ..color = const Color(0xCCF1EAE0),
     );
 
     // Thirds, faint: enough to compose with, not enough to fight the picture.
     final thirds = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.7
-      ..color = const Color(0x40FFFFFF);
+      ..color = const Color(0x38FFFFFF);
     for (var i = 1; i < 3; i++) {
       final dx = window.left + window.width * i / 3;
       final dy = window.top + window.height * i / 3;
       canvas.drawLine(Offset(dx, window.top), Offset(dx, window.bottom), thirds);
       canvas.drawLine(Offset(window.left, dy), Offset(window.right, dy), thirds);
     }
+
+    if (showHandles) _paintHandles(canvas, window);
     canvas.restore();
+  }
+
+  void _paintHandles(Canvas canvas, Rect window) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xFFF1EAE0);
+
+    const arm = 18.0;
+    // Corners: L-shaped brackets that read as "grab here".
+    for (final corner in [
+      (window.topLeft, 1.0, 1.0),
+      (window.topRight, -1.0, 1.0),
+      (window.bottomLeft, 1.0, -1.0),
+      (window.bottomRight, -1.0, -1.0),
+    ]) {
+      final (point, sx, sy) = corner;
+      canvas.drawLine(point, point.translate(arm * sx, 0), paint);
+      canvas.drawLine(point, point.translate(0, arm * sy), paint);
+    }
+
+    // Edge midpoints: a short bar so the sides are visibly draggable too.
+    const bar = 13.0;
+    final mid = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xB3F1EAE0);
+    canvas.drawLine(
+      Offset(window.center.dx, window.top),
+      Offset(window.center.dx, window.top + bar),
+      mid,
+    );
+    canvas.drawLine(
+      Offset(window.center.dx, window.bottom),
+      Offset(window.center.dx, window.bottom - bar),
+      mid,
+    );
+    canvas.drawLine(
+      Offset(window.left, window.center.dy),
+      Offset(window.left + bar, window.center.dy),
+      mid,
+    );
+    canvas.drawLine(
+      Offset(window.right, window.center.dy),
+      Offset(window.right - bar, window.center.dy),
+      mid,
+    );
   }
 
   @override
   bool shouldRepaint(_CropPainter oldDelegate) =>
       oldDelegate.image != image ||
-      oldDelegate.scale != scale ||
-      oldDelegate.origin != origin ||
+      oldDelegate.frame != frame ||
+      oldDelegate.showHandles != showHandles ||
       oldDelegate.crop.x != crop.x ||
       oldDelegate.crop.y != crop.y ||
       oldDelegate.crop.width != crop.width ||

@@ -162,6 +162,18 @@ class CropBox {
   bool get isCentred =>
       (positionX - 0.5).abs() < 0.02 && (positionY - 0.5).abs() < 0.02;
 
+  double get centerX => x + width / 2;
+  double get centerY => y + height / 2;
+
+  /// Ratio in normalised units. Only equal to the picture's ratio when the
+  /// frame and the crop have the same aspect, which is why callers that need a
+  /// real aspect pass the frame's size along.
+  double get ratio => height <= 0 ? 1 : width / height;
+
+  /// The aspect as the viewer sees it, given the frame's pixel size.
+  double aspect(double frameWidth, double frameHeight) =>
+      height <= 0 ? 1 : (width * frameWidth) / (height * frameHeight);
+
   /// Human-readable placement, e.g. `水平 62% · 垂直 50%`.
   String get placementLabel {
     if (isCentred) return '居中';
@@ -169,6 +181,149 @@ class CropBox {
     final v = (positionY * 100).round();
     return '水平 $h% · 垂直 $v%';
   }
+}
+
+/// Which grip of the crop window is being dragged.
+enum CropHandle { topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
+
+/// Move one edge or corner of [crop] by (dx, dy) in normalised units.
+///
+/// [lockedAspect] is the ratio the *picture* must keep (`width * frameWidth /
+/// (height * frameHeight)`); when given, the other axis follows so the window
+/// keeps that shape. Without it the window is free.
+CropBox resizeCrop(
+  CropBox crop,
+  CropHandle handle,
+  double dx,
+  double dy, {
+  double? lockedAspect,
+  double minSize = 0.08,
+  double frameWidth = 1,
+  double frameHeight = 1,
+}) {
+  var left = crop.x;
+  var top = crop.y;
+  var right = crop.x + crop.width;
+  var bottom = crop.y + crop.height;
+
+  switch (handle) {
+    case CropHandle.topLeft:
+      left += dx;
+      top += dy;
+    case CropHandle.top:
+      top += dy;
+    case CropHandle.topRight:
+      right += dx;
+      top += dy;
+    case CropHandle.right:
+      right += dx;
+    case CropHandle.bottomRight:
+      right += dx;
+      bottom += dy;
+    case CropHandle.bottom:
+      bottom += dy;
+    case CropHandle.bottomLeft:
+      left += dx;
+      bottom += dy;
+    case CropHandle.left:
+      left += dx;
+  }
+
+  // Bring both edges back into the frame first (a big drag can overshoot by
+  // any amount), then enforce the minimum size on whichever edge moved.
+  left = left.clamp(0.0, 1.0);
+  right = right.clamp(0.0, 1.0);
+  top = top.clamp(0.0, 1.0);
+  bottom = bottom.clamp(0.0, 1.0);
+
+  if (right - left < minSize) {
+    final draggedLeft = handle == CropHandle.topLeft ||
+        handle == CropHandle.bottomLeft ||
+        handle == CropHandle.left;
+    if (draggedLeft) {
+      left = (right - minSize).clamp(0.0, 1.0);
+    } else {
+      right = (left + minSize).clamp(0.0, 1.0);
+    }
+    if (right - left < minSize) return crop;
+  }
+  if (bottom - top < minSize) {
+    final draggedTop = handle == CropHandle.topLeft ||
+        handle == CropHandle.topRight ||
+        handle == CropHandle.top;
+    if (draggedTop) {
+      top = (bottom - minSize).clamp(0.0, 1.0);
+    } else {
+      bottom = (top + minSize).clamp(0.0, 1.0);
+    }
+    if (bottom - top < minSize) return crop;
+  }
+
+  if (lockedAspect != null && lockedAspect > 0 && frameWidth > 0 && frameHeight > 0) {
+    // Target width/height expressed in normalised units.
+    final k = lockedAspect * frameHeight / frameWidth;
+    final horizontal = handle == CropHandle.left || handle == CropHandle.right;
+
+    if (horizontal) {
+      var width = right - left;
+      var height = width / k;
+      final centreY = (top + bottom) / 2;
+      if (height > 1) {
+        height = 1;
+        width = height * k;
+        left = left.clamp(0.0, 1.0 - width);
+        right = left + width;
+      }
+      top = centreY - height / 2;
+      bottom = top + height;
+    } else {
+      var height = bottom - top;
+      var width = height * k;
+      final centreX = (left + right) / 2;
+      if (width > 1) {
+        width = 1;
+        height = width / k;
+        top = top.clamp(0.0, 1.0 - height);
+        bottom = top + height;
+      }
+      left = centreX - width / 2;
+      right = left + width;
+    }
+
+    // Pull the window back inside the frame, shrinking if it must.
+    if (left < 0) {
+      right -= left;
+      left = 0;
+    }
+    if (right > 1) {
+      left -= right - 1;
+      right = 1;
+    }
+    if (top < 0) {
+      bottom -= top;
+      top = 0;
+    }
+    if (bottom > 1) {
+      top -= bottom - 1;
+      bottom = 1;
+    }
+    if (right - left < minSize || bottom - top < minSize) {
+      return crop;
+    }
+  }
+
+  return CropBox(left, top, right - left, bottom - top);
+}
+
+/// Scale [crop] about its own centre, keeping it inside the frame. This is
+/// what a pinch does: the window shrinks or grows but never leaves the picture.
+CropBox scaleCrop(CropBox crop, double factor, {double minSize = 0.08}) {
+  if (factor <= 0) return crop;
+  final width = (crop.width * factor).clamp(minSize, 1.0);
+  final height = (crop.height * factor).clamp(minSize, 1.0);
+  final x = (crop.x + (crop.width - width) / 2).clamp(0.0, 1.0 - width);
+  final y = (crop.y + (crop.height - height) / 2).clamp(0.0, 1.0 - height);
+  return CropBox(x, y, width, height);
 }
 
 /// The largest centred crop of a [sourceWidth] × [sourceHeight] frame whose
