@@ -6,10 +6,13 @@ void main() {
     await tester.pumpWidget(const HalfstopApp());
     await tester.pump();
 
-    // Header lockup + the empty-state wordmark both say it.
-    expect(find.text('半档'), findsWidgets);
-    expect(find.text('HALFSTOP'), findsWidgets);
+    // The landing page carries the wordmark and both entry cards; the header
+    // is now just back / 原图·预览 / 导出.
+    expect(find.text('半档'), findsOneWidget);
     expect(find.text('从相册选择'), findsOneWidget);
     expect(find.text('RAW 文件'), findsOneWidget);
+    expect(find.text('原图'), findsOneWidget);
+    expect(find.text('预览'), findsOneWidget);
+    expect(find.text('导出'), findsOneWidget);
   });
 }
