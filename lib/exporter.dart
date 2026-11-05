@@ -6,6 +6,8 @@ import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'layer2.dart';
+
 /// Result of a finished export.
 class ExportedPhoto {
   const ExportedPhoto({
@@ -52,6 +54,7 @@ Future<ExportedPhoto> encodeAndSave({
   required String fileName,
   int? longEdge,
   int quality = 92,
+  List<double>? matrix,
 }) async {
   final encoded = await Isolate.run(
     () => _encodeJpeg(
@@ -60,6 +63,7 @@ Future<ExportedPhoto> encodeAndSave({
       height: height,
       longEdge: longEdge,
       quality: quality,
+      matrix: matrix,
     ),
   );
 
@@ -112,7 +116,12 @@ _Encoded _encodeJpeg({
   required int height,
   int? longEdge,
   required int quality,
+  List<double>? matrix,
 }) {
+  if (matrix != null) {
+    // Same matrix the preview drew with, replayed on the real pixels.
+    Layer2Params.applyToRgba8(pixels, matrix);
+  }
   img.Image image = img.Image.fromBytes(
     width: width,
     height: height,

@@ -22,6 +22,8 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 - [x] 编辑器壳：导入、预览、胶片/相纸、颗粒/光晕/眩光、原图对比、诊断
 - [x] 导出 JPEG（`full` tier → 独立 isolate 编码 → 相册 `Spektrafilm`）
 - [x] 撤销（20 步，一次滑块拖动合并成一步）
+- [x] 调色层（Layer 2）：亮度/对比/饱和/色温/色调，GPU 颜色矩阵，拖动不回引擎
+- [x] 直方图：从当前帧采样 64k 像素，随调色实时重算
 
 还要做 / 待真机验证：
 
@@ -38,7 +40,8 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 |---|---|---|
 | `print_exposure`、`m_filter_shift`、`y_filter_shift`、`preflash_exposure`、`filter_shift_scale` | `spk_set_params` → `spk_reprint("live")` | 复用缓存底片，只重印，拖动中约 100 ms 出帧 |
 | 胶片、相纸、颗粒、光晕、眩光 | `spk_set_params` → `spk_reprint("live")` | 会让底片失效，松手才渲染 |
-| 曝光/曲线/白平衡（规划中） | Flutter fragment shader | 60 fps，不碰引擎 |
+| 亮度/对比/饱和/色温/色调 | Layer 2 颜色矩阵（GPU） | 一次重绘，不碰引擎 |
+| 曲线 / 色轮（规划中） | Flutter fragment shader | 需要自定义 shader 与 LUT |
 
 `EngineWorker` 把 engine 和 session 常驻在同一个 isolate 里，FFI 指针不跨 isolate；
 UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不堵 UI 线程。
@@ -75,6 +78,8 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 |---|---|
 | `lib/` | Dart 代码 |
 | `lib/exporter.dart` | JPEG 编码 + 相册落盘 |
+| `lib/layer2.dart` | 调色层：颜色矩阵 + 导出时同一套算式 |
+| `lib/histogram.dart` | 直方图采样与绘制 |
 | `android/app/src/main/cpp/` | `CMakeLists.txt` + FFI 桥 |
 | `android/app/src/main/kotlin/.../MainActivity.kt` | 首次启动解压 `assets/engine/**` |
 | `third_party/spektrafilm/` | 上游引擎（`tool/fetch-engine.ps1` 拉取，不入库） |

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'engine_bridge.dart';
 import 'engine_worker.dart';
 import 'exporter.dart';
+import 'histogram.dart';
+import 'layer2.dart';
 import 'stock_catalog.dart';
 
 const Color _kBackground = Color(0xFF0B0C0F);
@@ -77,6 +80,14 @@ class _EditorPageState extends State<EditorPage> {
   final List<_EditSnapshot> _history = [];
 
   bool _exporting = false;
+
+  /// Layer 2: the digital colour layer. Applied on the GPU by the preview and
+  /// replayed in Dart on export, so no engine round-trip is involved.
+  Layer2Params _layer2 = Layer2Params.neutral;
+  Uint8List? _framePixels;
+  Histogram? _histogram;
+  bool _showHistogram = true;
+  _PanelLayer _panelLayer = _PanelLayer.print;
 
   @override
   void initState() {
@@ -217,6 +228,7 @@ class _EditorPageState extends State<EditorPage> {
         grain: _grain,
         halation: _halation,
         glare: _glare,
+        layer2: _layer2,
       );
 
   void _restore(_EditSnapshot snapshot) {
@@ -230,6 +242,7 @@ class _EditorPageState extends State<EditorPage> {
     _grain = snapshot.grain;
     _halation = snapshot.halation;
     _glare = snapshot.glare;
+    _layer2 = snapshot.layer2;
   }
 
   /// Call once at the start of a gesture, before the first `setState`.
@@ -441,6 +454,7 @@ class _EditorPageState extends State<EditorPage> {
         fileName: exportFileName(_film),
         longEdge: options.longEdge,
         quality: options.quality,
+        matrix: _layer2.isNeutral ? null : _layer2.matrix,
       );
       if (!mounted) return;
       if (dialogOpen) Navigator.of(context, rootNavigator: true).pop();
@@ -509,6 +523,8 @@ class _EditorPageState extends State<EditorPage> {
       _imageWidth = frame.width;
       _imageHeight = frame.height;
       _showingSource = false;
+      _framePixels = frame.pixels;
+      _histogram = Histogram.fromRgba8(frame.pixels, matrix: _layer2.matrix);
       if (fast) {
         _liveFrames++;
         _lastLiveMs = wallMs ?? frame.renderMs?.round() ?? 0;
@@ -669,10 +685,14 @@ class _EditorPageState extends State<EditorPage> {
         fit: StackFit.expand,
         children: [
           if (image != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: RawImage(image: image, fit: BoxFit.contain),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: CustomPaint(
+                painter: _PreviewPainter(
+                  image: image,
+                  colorFilter: _layer2.colorFilter,
+                ),
+                child: const SizedBox.expand(),
               ),
             )
           else
@@ -688,6 +708,12 @@ class _EditorPageState extends State<EditorPage> {
                     : '$_imageWidth×$_imageHeight · ${_quality == PreviewQuality.fast ? '实时' : '精细'} · '
                         '$_lastLiveMs ms${_lastReprint ? ' · reprint' : ''} · #$_liveFrames',
               ),
+            ),
+          if (_image != null && _showHistogram)
+            Positioned(
+              right: 14,
+              bottom: 12,
+              child: HistogramView(data: _histogram),
             ),
           if (_image != null)
             Positioned(
@@ -845,6 +871,7 @@ class _EditorPageState extends State<EditorPage> {
   Widget _buildPanel(ThemeData theme) {
     final canRender = _hasSession && !_busy;
     final canPick = !_busy;
+    final isPrint = _panelLayer == _PanelLayer.print;
     return Container(
       decoration: const BoxDecoration(
         color: _kSurface,
@@ -870,7 +897,7 @@ class _EditorPageState extends State<EditorPage> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                 child: Row(
                   children: [
-                    SegmentedButton<PreviewQuality>(
+                    SegmentedButton<_PanelLayer>(
                       showSelectedIcon: false,
                       style: ButtonStyle(
                         visualDensity: VisualDensity.compact,
@@ -878,27 +905,26 @@ class _EditorPageState extends State<EditorPage> {
                         textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
                       ),
                       segments: const [
-                        ButtonSegment(value: PreviewQuality.fast, label: Text('实时 1600')),
-                        ButtonSegment(value: PreviewQuality.fine, label: Text('精细 3400')),
+                        ButtonSegment(value: _PanelLayer.print, label: Text('印片')),
+                        ButtonSegment(value: _PanelLayer.color, label: Text('调色')),
                       ],
-                      selected: {_quality},
-                      onSelectionChanged: _busy
-                          ? null
-                          : (selection) {
-                              final quality = selection.first;
-                              setState(() => _quality = quality);
-                              if (quality == PreviewQuality.fine) {
-                                _renderFine();
-                              } else if (_hasSession) {
-                                // Back to live: one cheap frame so the pixels
-                                // match the mode the badge now claims.
-                                _requestLive();
-                              }
-                            },
+                      selected: {_panelLayer},
+                      onSelectionChanged: (selection) =>
+                          setState(() => _panelLayer = selection.first),
                     ),
                     const Spacer(),
+                    IconButton(
+                      tooltip: _showHistogram ? '隐藏直方图' : '显示直方图',
+                      onPressed: () => setState(() => _showHistogram = !_showHistogram),
+                      icon: Icon(
+                        _showHistogram ? Icons.bar_chart_rounded : Icons.bar_chart_outlined,
+                        size: 18,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      color: _kTextDim,
+                    ),
                     TextButton.icon(
-                      onPressed: canRender ? _resetLive : null,
+                      onPressed: canRender ? (isPrint ? _resetLive : _resetColor) : null,
                       icon: const Icon(Icons.restart_alt, size: 16),
                       label: const Text('重置'),
                       style: TextButton.styleFrom(
@@ -909,133 +935,46 @@ class _EditorPageState extends State<EditorPage> {
                   ],
                 ),
               ),
+              if (isPrint)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Row(
+                    children: [
+                      SegmentedButton<PreviewQuality>(
+                        showSelectedIcon: false,
+                        style: ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
+                        ),
+                        segments: const [
+                          ButtonSegment(value: PreviewQuality.fast, label: Text('实时 1600')),
+                          ButtonSegment(value: PreviewQuality.fine, label: Text('精细 3400')),
+                        ],
+                        selected: {_quality},
+                        onSelectionChanged: _busy
+                            ? null
+                            : (selection) {
+                                final quality = selection.first;
+                                setState(() => _quality = quality);
+                                if (quality == PreviewQuality.fine) {
+                                  _renderFine();
+                                } else if (_hasSession) {
+                                  // Back to live: one cheap frame so the pixels
+                                  // match the mode the badge now claims.
+                                  _requestLive();
+                                }
+                              },
+                      ),
+                    ],
+                  ),
+                ),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(8, 2, 8, 12),
-                  children: [
-                    _sliderRow(
-                      theme,
-                      label: '曝光',
-                      valueLabel: '${_exposureEv >= 0 ? '+' : ''}${_exposureEv.toStringAsFixed(2)} EV',
-                      value: _exposureEv,
-                      min: -4,
-                      max: 4,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) {
-                        setState(() => _exposureEv = value);
-                        _requestLive();
-                      },
-                      onChangeEnd: (_) {
-                        if (_quality == PreviewQuality.fine) _renderFine();
-                      },
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '品红 M',
-                      valueLabel: _magenta.toStringAsFixed(2),
-                      value: _magenta,
-                      min: -1,
-                      max: 1,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) {
-                        setState(() => _magenta = value);
-                        _requestLive();
-                      },
-                      onChangeEnd: (_) {
-                        if (_quality == PreviewQuality.fine) _renderFine();
-                      },
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '黄 Y',
-                      valueLabel: _yellow.toStringAsFixed(2),
-                      value: _yellow,
-                      min: -1,
-                      max: 1,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) {
-                        setState(() => _yellow = value);
-                        _requestLive();
-                      },
-                      onChangeEnd: (_) {
-                        if (_quality == PreviewQuality.fine) _renderFine();
-                      },
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '偏移强度',
-                      valueLabel: _shiftScale.toStringAsFixed(0),
-                      value: _shiftScale,
-                      min: 1,
-                      max: 60,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) {
-                        setState(() => _shiftScale = value);
-                        _requestLive();
-                      },
-                      onChangeEnd: (_) {
-                        if (_quality == PreviewQuality.fine) _renderFine();
-                      },
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '预闪',
-                      valueLabel: _preflash.toStringAsFixed(2),
-                      value: _preflash,
-                      min: 0,
-                      max: 1,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) {
-                        setState(() => _preflash = value);
-                        _requestLive();
-                      },
-                      onChangeEnd: (_) {
-                        if (_quality == PreviewQuality.fine) _renderFine();
-                      },
-                    ),
-                    const Divider(height: 20, color: Color(0xFF23262E)),
-                    _sliderRow(
-                      theme,
-                      label: '颗粒',
-                      valueLabel: _grain.toStringAsFixed(2),
-                      value: _grain,
-                      min: 0,
-                      max: 2,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) => setState(() => _grain = value),
-                      onChangeEnd: (_) => _applySlow(),
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '光晕',
-                      valueLabel: _halation.toStringAsFixed(2),
-                      value: _halation,
-                      min: 0,
-                      max: 4,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) => setState(() => _halation = value),
-                      onChangeEnd: (_) => _applySlow(),
-                    ),
-                    _sliderRow(
-                      theme,
-                      label: '眩光',
-                      valueLabel: _glare.toStringAsFixed(1),
-                      value: _glare,
-                      min: 0,
-                      max: 30,
-                      enabled: canRender,
-                      onChangeStart: (_) => _pushUndo(),
-                      onChanged: (value) => setState(() => _glare = value),
-                      onChangeEnd: (_) => _applySlow(),
-                    ),
-                  ],
+                  children: isPrint
+                      ? _printSliders(theme, canRender)
+                      : _colorSliders(theme, canRender),
                 ),
               ),
             ],
@@ -1043,6 +982,204 @@ class _EditorPageState extends State<EditorPage> {
         ),
       ),
     );
+  }
+
+  /// Layer 1 controls: every one of these ends in an engine reprint.
+  List<Widget> _printSliders(ThemeData theme, bool canRender) {
+    return [
+      _sliderRow(
+        theme,
+        label: '曝光',
+        valueLabel: '${_exposureEv >= 0 ? '+' : ''}${_exposureEv.toStringAsFixed(2)} EV',
+        value: _exposureEv,
+        min: -4,
+        max: 4,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) {
+          setState(() => _exposureEv = value);
+          _requestLive();
+        },
+        onChangeEnd: (_) {
+          if (_quality == PreviewQuality.fine) _renderFine();
+        },
+      ),
+      _sliderRow(
+        theme,
+        label: '品红 M',
+        valueLabel: _magenta.toStringAsFixed(2),
+        value: _magenta,
+        min: -1,
+        max: 1,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) {
+          setState(() => _magenta = value);
+          _requestLive();
+        },
+        onChangeEnd: (_) {
+          if (_quality == PreviewQuality.fine) _renderFine();
+        },
+      ),
+      _sliderRow(
+        theme,
+        label: '黄 Y',
+        valueLabel: _yellow.toStringAsFixed(2),
+        value: _yellow,
+        min: -1,
+        max: 1,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) {
+          setState(() => _yellow = value);
+          _requestLive();
+        },
+        onChangeEnd: (_) {
+          if (_quality == PreviewQuality.fine) _renderFine();
+        },
+      ),
+      _sliderRow(
+        theme,
+        label: '偏移强度',
+        valueLabel: _shiftScale.toStringAsFixed(0),
+        value: _shiftScale,
+        min: 1,
+        max: 60,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) {
+          setState(() => _shiftScale = value);
+          _requestLive();
+        },
+        onChangeEnd: (_) {
+          if (_quality == PreviewQuality.fine) _renderFine();
+        },
+      ),
+      _sliderRow(
+        theme,
+        label: '预闪',
+        valueLabel: _preflash.toStringAsFixed(2),
+        value: _preflash,
+        min: 0,
+        max: 1,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) {
+          setState(() => _preflash = value);
+          _requestLive();
+        },
+        onChangeEnd: (_) {
+          if (_quality == PreviewQuality.fine) _renderFine();
+        },
+      ),
+      const Divider(height: 20, color: Color(0xFF23262E)),
+      _sliderRow(
+        theme,
+        label: '颗粒',
+        valueLabel: _grain.toStringAsFixed(2),
+        value: _grain,
+        min: 0,
+        max: 2,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _grain = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _sliderRow(
+        theme,
+        label: '光晕',
+        valueLabel: _halation.toStringAsFixed(2),
+        value: _halation,
+        min: 0,
+        max: 4,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _halation = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _sliderRow(
+        theme,
+        label: '眩光',
+        valueLabel: _glare.toStringAsFixed(1),
+        value: _glare,
+        min: 0,
+        max: 30,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _glare = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+    ];
+  }
+
+  /// Layer 2 controls: a GPU colour matrix. No engine call, no `_busy`, so the
+  /// preview keeps up with the thumb.
+  List<Widget> _colorSliders(ThemeData theme, bool canRender) {
+    final enabled = _hasSession && !_busy;
+    return [
+      _sliderRow(
+        theme,
+        label: '亮度',
+        valueLabel: '${_layer2.brightness >= 0 ? '+' : ''}${_layer2.brightness.toStringAsFixed(2)} EV',
+        value: _layer2.brightness,
+        min: -2,
+        max: 2,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => _setLayer2(_layer2.copyWith(brightness: value)),
+      ),
+      _sliderRow(
+        theme,
+        label: '对比',
+        valueLabel: _layer2.contrast.toStringAsFixed(2),
+        value: _layer2.contrast,
+        min: -1,
+        max: 1,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => _setLayer2(_layer2.copyWith(contrast: value)),
+      ),
+      _sliderRow(
+        theme,
+        label: '饱和',
+        valueLabel: _layer2.saturation.toStringAsFixed(2),
+        value: _layer2.saturation,
+        min: -1,
+        max: 1,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => _setLayer2(_layer2.copyWith(saturation: value)),
+      ),
+      _sliderRow(
+        theme,
+        label: '色温',
+        valueLabel: _layer2.temperature.toStringAsFixed(2),
+        value: _layer2.temperature,
+        min: -1,
+        max: 1,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => _setLayer2(_layer2.copyWith(temperature: value)),
+      ),
+      _sliderRow(
+        theme,
+        label: '色调',
+        valueLabel: _layer2.tint.toStringAsFixed(2),
+        value: _layer2.tint,
+        min: -1,
+        max: 1,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => _setLayer2(_layer2.copyWith(tint: value)),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+        child: Text(
+          '调色层作用在渲染结果上，拖动不触发引擎重算，导出时按同一套算式烘进 JPEG。',
+          style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.4),
+        ),
+      ),
+    ];
   }
 
   Widget _buildStockPicker(ThemeData theme, {required bool film, required bool enabled}) {
@@ -1146,6 +1283,24 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
+  /// Layer 2 never touches the engine: the preview repaints from the frame we
+  /// already hold with a new colour matrix, and the histogram is re-binned from
+  /// the same bytes. This is why these sliders have no `_requestLive`.
+  void _setLayer2(Layer2Params next) {
+    final pixels = _framePixels;
+    setState(() {
+      _layer2 = next;
+      if (pixels != null) {
+        _histogram = Histogram.fromRgba8(pixels, matrix: next.matrix);
+      }
+    });
+  }
+
+  void _resetColor() {
+    _pushUndo();
+    _setLayer2(Layer2Params.neutral);
+  }
+
   void _resetLive() {
     _pushUndo();
     setState(() {
@@ -1199,6 +1354,44 @@ class _EditorPageState extends State<EditorPage> {
   }
 }
 
+/// Which group of sliders the panel is showing.
+///
+/// `print` is the enlarger/film side and costs an engine reprint; `color` is
+/// Layer 2 and costs nothing but a repaint.
+enum _PanelLayer { print, color }
+
+/// Draws the frame with the Layer 2 colour matrix, keeping the fit the old
+/// `RawImage` had. `colorFilter` is a GPU operation, so dragging a Layer 2
+/// slider never waits for the engine.
+class _PreviewPainter extends CustomPainter {
+  _PreviewPainter({required this.image, required this.colorFilter});
+
+  final ui.Image image;
+  final ui.ColorFilter colorFilter;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final source = Size(image.width.toDouble(), image.height.toDouble());
+    final fitted = applyBoxFit(BoxFit.contain, source, size);
+    final destination = Alignment.center.inscribe(
+      fitted.destination,
+      Offset.zero & size,
+    );
+    canvas.drawImageRect(
+      image,
+      Offset.zero & source,
+      destination,
+      Paint()
+        ..filterQuality = FilterQuality.medium
+        ..colorFilter = colorFilter,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PreviewPainter oldDelegate) =>
+      oldDelegate.image != image || oldDelegate.colorFilter != colorFilter;
+}
+
 /// One undo step: every user-editable value at the moment a gesture started.
 class _EditSnapshot {
   const _EditSnapshot({
@@ -1212,6 +1405,7 @@ class _EditSnapshot {
     required this.grain,
     required this.halation,
     required this.glare,
+    required this.layer2,
   });
 
   final String film;
@@ -1224,6 +1418,7 @@ class _EditSnapshot {
   final double grain;
   final double halation;
   final double glare;
+  final Layer2Params layer2;
 }
 
 class _ExportOptions {
