@@ -72,6 +72,11 @@ class _EditorPageState extends State<EditorPage> {
   double _shiftScale = 1;
   double _preflash = 0;
 
+  /// 0..1, where 1 is the full film render and 0 is the untouched source.
+  /// Implemented as a composite, not an engine parameter: the engine has no
+  /// notion of "half a film".
+  double _strength = 1;
+
   double _grain = 1;
   double _halation = 1;
   double _glare = 0;
@@ -117,7 +122,7 @@ class _EditorPageState extends State<EditorPage> {
         return;
       }
       final films = stocks.where((stock) => stock.isFilm).toList();
-      final papers = stocks.where((stock) => stock.isPaper).toList();
+      final papers = stocks.where((stock) => stock.isPrintStock).toList();
       setState(() {
         _worker = worker;
         _resourcesDir = resourcesDir;
@@ -142,7 +147,8 @@ class _EditorPageState extends State<EditorPage> {
 
   List<Stock> get _films => _stocks.where((stock) => stock.isFilm).toList();
 
-  List<Stock> get _papers => _stocks.where((stock) => stock.isPaper).toList();
+  List<Stock> get _printStocks =>
+      _stocks.where((stock) => stock.isPrintStock).toList();
 
   String _stockName(String id) {
     for (final stock in _stocks) {
@@ -276,6 +282,7 @@ class _EditorPageState extends State<EditorPage> {
       });
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
+      unawaited(_ensureSource());
     } catch (error) {
       _setError(error);
     } finally {
@@ -331,6 +338,24 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  /// Loads the "before" frame once, at preview size. The before/after toggle
+  /// uses it, and so does the strength composite — which is why it is fetched
+  /// as soon as an image opens rather than on first demand.
+  Future<void> _ensureSource() async {
+    if (_sourceImage != null || !_hasSession || _busy) return;
+    try {
+      final frame = await _worker!.exportSource(tier: 'live');
+      final image = await _imageFromFrame(frame);
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      setState(() => _sourceImage = image);
+    } catch (error) {
+      _setError(error);
+    }
+  }
+
   void _setError(Object error) {
     if (!mounted) return;
     setState(() => _error = error.toString());
@@ -347,6 +372,7 @@ class _EditorPageState extends State<EditorPage> {
         grain: _grain,
         halation: _halation,
         glare: _glare,
+        strength: _strength,
         layer2: _layer2,
       );
 
@@ -361,6 +387,7 @@ class _EditorPageState extends State<EditorPage> {
     _grain = snapshot.grain;
     _halation = snapshot.halation;
     _glare = snapshot.glare;
+    _strength = snapshot.strength;
     _layer2 = snapshot.layer2;
   }
 
@@ -496,6 +523,10 @@ class _EditorPageState extends State<EditorPage> {
       setState(() => _showingSource = false);
       return;
     }
+    if (_sourceImage != null) {
+      setState(() => _showingSource = true);
+      return;
+    }
     setState(() => _busy = true);
     try {
       final frame = await _worker!.exportSource(tier: 'live');
@@ -559,11 +590,19 @@ class _EditorPageState extends State<EditorPage> {
       stage.value = '渲染全尺寸…';
       final frame = await _worker!.render(tier: 'full');
       final megapixels = frame.width * frame.height / 1000000;
-      if (options.longEdge == null && megapixels > _maxFullExportMp) {
+      // Blending needs the source frame as well, so the ceiling halves.
+      final ceiling = _strength < 0.999 ? _maxFullExportMp / 2 : _maxFullExportMp;
+      if (options.longEdge == null && megapixels > ceiling) {
         throw ExportFailure(
-          '这张 ${megapixels.toStringAsFixed(0)} MP，全尺寸导出内存吃紧。'
+          '这张 ${megapixels.toStringAsFixed(0)} MP，全尺寸导出内存吃紧'
+          '${_strength < 0.999 ? '（模拟强度未满 100%，需要同时持有原图）' : ''}。'
           '把长边设成 4000 或 2048 再导。',
         );
+      }
+      RenderFrame? sourceFrame;
+      if (_strength < 0.999) {
+        stage.value = '取原图用于混合…';
+        sourceFrame = await _worker!.exportSource(tier: 'full');
       }
       stage.value = '编码 JPEG…';
       final input = (_openInfo['input'] as Map?)?.cast<String, dynamic>() ?? const {};
@@ -578,6 +617,10 @@ class _EditorPageState extends State<EditorPage> {
         sourcePath: _path,
         make: input['make'] as String?,
         model: input['model'] as String?,
+        strength: _strength,
+        sourcePixels: sourceFrame?.pixels,
+        sourceWidth: sourceFrame?.width,
+        sourceHeight: sourceFrame?.height,
       );
       if (!mounted) return;
       if (dialogOpen) Navigator.of(context, rootNavigator: true).pop();
@@ -766,7 +809,7 @@ class _EditorPageState extends State<EditorPage> {
                   ? '正在启动引擎…'
                   : _path == null
                       ? '物理胶片模拟 · 相册图片或 RAW'
-                      : '${_films.length} 胶片 · ${_papers.length} 相纸 · 实时 ${_previewEdge}px',
+                      : '${_films.length} 胶片 · ${_printStocks.length} 印片 · 实时 ${_previewEdge}px',
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
           ],
@@ -821,6 +864,8 @@ class _EditorPageState extends State<EditorPage> {
                 painter: _PreviewPainter(
                   image: image,
                   colorFilter: _layer2.colorFilter,
+                  sourceImage: _sourceImage,
+                  strength: _strength,
                 ),
                 child: const SizedBox.expand(),
               ),
@@ -1044,9 +1089,9 @@ class _EditorPageState extends State<EditorPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Row(
                   children: [
-                    Expanded(child: _buildStockPicker(theme, film: true, enabled: canPick)),
+                    Expanded(child: _buildStockField(theme, film: true, enabled: canPick)),
                     const SizedBox(width: 10),
-                    Expanded(child: _buildStockPicker(theme, film: false, enabled: canPick)),
+                    Expanded(child: _buildStockField(theme, film: false, enabled: canPick)),
                   ],
                 ),
               ),
@@ -1144,6 +1189,21 @@ class _EditorPageState extends State<EditorPage> {
   /// Layer 1 controls: every one of these ends in an engine reprint.
   List<Widget> _printSliders(ThemeData theme, bool canRender) {
     return [
+      _sliderRow(
+        theme,
+        label: '模拟强度',
+        valueLabel: '${(_strength * 100).round()}%',
+        value: _strength,
+        min: 0,
+        max: 1,
+        enabled: canRender,
+        onChangeStart: (_) {
+          _pushUndo();
+          unawaited(_ensureSource());
+        },
+        // Pure composite: no engine call, so this drag is free.
+        onChanged: (value) => setState(() => _strength = value),
+      ),
       _sliderRow(
         theme,
         label: '曝光',
@@ -1328,46 +1388,124 @@ class _EditorPageState extends State<EditorPage> {
     ];
   }
 
-  Widget _buildStockPicker(ThemeData theme, {required bool film, required bool enabled}) {
-    final options = film ? _films : _papers;
+  Widget _buildStockField(ThemeData theme, {required bool film, required bool enabled}) {
     final value = film ? _film : _paper;
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: _kSurfaceHigh,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF2A2E37)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          isExpanded: true,
-          value: options.any((stock) => stock.id == value) ? value : null,
-          hint: Text(
-            options.isEmpty ? '未找到 profile' : (film ? '胶片' : '相纸'),
-            style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
-          ),
-          icon: const Icon(Icons.expand_more, size: 18, color: _kTextDim),
-          dropdownColor: _kSurfaceHigh,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface,
-            fontWeight: FontWeight.w500,
-          ),
-          onChanged: enabled
-              ? (id) {
-                  if (id != null) _changeStock(film ? 'film_stock' : 'print_stock', id);
-                }
-              : null,
-          items: [
-            for (final stock in options)
-              DropdownMenuItem(
-                value: stock.id,
-                child: Text(stock.name, overflow: TextOverflow.ellipsis),
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: enabled && _stocks.isNotEmpty ? () => _showStockSheet(film: film) : null,
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: _kSurfaceHigh,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF2A2E37)),
+        ),
+        child: Row(
+          children: [
+            Text(
+              film ? '胶片 ' : '相纸 ',
+              style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+            ),
+            Expanded(
+              child: Text(
+                _stocks.isEmpty ? '未找到 profile' : _stockName(value),
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
+            ),
+            const Icon(Icons.expand_more, size: 18, color: _kTextDim),
           ],
         ),
       ),
     );
+  }
+
+  /// One sheet for both fields, grouped by what the stock actually is. The
+  /// categories come from the profiles' own `stage`/`support`, so a bundle
+  /// update reorders this list without a code change.
+  Future<void> _showStockSheet({required bool film}) async {
+    final grouped = groupStocks(
+      _stocks.where((stock) => film ? stock.isFilm : stock.isPrintStock),
+    );
+    final current = film ? _film : _paper;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _kSurface,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        maxChildSize: 0.92,
+        builder: (context, controller) {
+          final theme = Theme.of(context);
+          return ListView(
+            controller: controller,
+            padding: const EdgeInsets.only(bottom: 28),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  film ? '选择胶片' : '选择相纸 / 印片胶片',
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              for (final entry in grouped.entries) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        entry.key.label,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: _kAccent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          entry.key.hint,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: _kTextDim,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${entry.value.length}',
+                        style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+                      ),
+                    ],
+                  ),
+                ),
+                for (final stock in entry.value)
+                  ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                    title: Text(stock.name, style: theme.textTheme.bodyMedium),
+                    trailing: stock.id == current
+                        ? const Icon(Icons.check_rounded, size: 18, color: _kAccent)
+                        : null,
+                    onTap: () => Navigator.of(context).pop(stock.id),
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+
+    if (picked != null && picked != current) {
+      await _changeStock(film ? 'film_stock' : 'print_stock', picked);
+    }
   }
 
   Widget _sliderRow(
@@ -1510,10 +1648,19 @@ enum _PanelLayer { print, color }
 /// `RawImage` had. `colorFilter` is a GPU operation, so dragging a Layer 2
 /// slider never waits for the engine.
 class _PreviewPainter extends CustomPainter {
-  _PreviewPainter({required this.image, required this.colorFilter});
+  _PreviewPainter({
+    required this.image,
+    required this.colorFilter,
+    this.sourceImage,
+    this.strength = 1,
+  });
 
   final ui.Image image;
   final ui.ColorFilter colorFilter;
+
+  /// The rendered frame is composited over this at [strength] opacity.
+  final ui.Image? sourceImage;
+  final double strength;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1523,19 +1670,39 @@ class _PreviewPainter extends CustomPainter {
       fitted.destination,
       Offset.zero & size,
     );
+
+    final before = sourceImage;
+    if (before != null && strength < 0.999) {
+      // Source first, unfiltered and opaque; then the film on top at `strength`.
+      // That is a straight linear crossfade in display space, which is what a
+      // "how much film" control should feel like.
+      final beforeSize = Size(before.width.toDouble(), before.height.toDouble());
+      final beforeFitted = applyBoxFit(BoxFit.contain, beforeSize, size);
+      canvas.drawImageRect(
+        before,
+        Offset.zero & beforeSize,
+        Alignment.center.inscribe(beforeFitted.destination, Offset.zero & size),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+    }
+
     canvas.drawImageRect(
       image,
       Offset.zero & source,
       destination,
       Paint()
         ..filterQuality = FilterQuality.medium
-        ..colorFilter = colorFilter,
+        ..colorFilter = colorFilter
+        ..color = Color.fromRGBO(255, 255, 255, before == null ? 1 : strength),
     );
   }
 
   @override
   bool shouldRepaint(_PreviewPainter oldDelegate) =>
-      oldDelegate.image != image || oldDelegate.colorFilter != colorFilter;
+      oldDelegate.image != image ||
+      oldDelegate.colorFilter != colorFilter ||
+      oldDelegate.sourceImage != sourceImage ||
+      oldDelegate.strength != strength;
 }
 
 /// One undo step: every user-editable value at the moment a gesture started.
@@ -1551,6 +1718,7 @@ class _EditSnapshot {
     required this.grain,
     required this.halation,
     required this.glare,
+    required this.strength,
     required this.layer2,
   });
 
@@ -1564,6 +1732,7 @@ class _EditSnapshot {
   final double grain;
   final double halation;
   final double glare;
+  final double strength;
   final Layer2Params layer2;
 }
 

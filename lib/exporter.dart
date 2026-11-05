@@ -63,6 +63,10 @@ Future<ExportedPhoto> encodeAndSave({
   String? sourcePath,
   String? make,
   String? model,
+  double strength = 1,
+  Uint8List? sourcePixels,
+  int? sourceWidth,
+  int? sourceHeight,
 }) async {
   final encoded = await Isolate.run(
     () => _encodeJpeg(
@@ -72,6 +76,10 @@ Future<ExportedPhoto> encodeAndSave({
       longEdge: longEdge,
       quality: quality,
       matrix: matrix,
+      strength: strength,
+      sourcePixels: sourcePixels,
+      sourceWidth: sourceWidth,
+      sourceHeight: sourceHeight,
     ),
   );
 
@@ -141,11 +149,32 @@ _Encoded _encodeJpeg({
   int? longEdge,
   required int quality,
   List<double>? matrix,
+  required double strength,
+  Uint8List? sourcePixels,
+  int? sourceWidth,
+  int? sourceHeight,
 }) {
+  // Layer 2 first, so the exported pixels match what the preview showed…
   if (matrix != null) {
-    // Same matrix the preview drew with, replayed on the real pixels.
     Layer2Params.applyToRgba8(pixels, matrix);
   }
+  // …then the strength crossfade against the untouched source. Different sizes
+  // mean the source never arrived for this tier; keep the film render rather
+  // than refusing to export.
+  if (sourcePixels != null &&
+      strength < 0.999 &&
+      sourceWidth == width &&
+      sourceHeight == height &&
+      sourcePixels.length == pixels.length) {
+    final k = strength.clamp(0.0, 1.0);
+    final inv = 1.0 - k;
+    for (var i = 0; i < pixels.length; i += 4) {
+      pixels[i] = (sourcePixels[i] * inv + pixels[i] * k).round();
+      pixels[i + 1] = (sourcePixels[i + 1] * inv + pixels[i + 1] * k).round();
+      pixels[i + 2] = (sourcePixels[i + 2] * inv + pixels[i + 2] * k).round();
+    }
+  }
+
   img.Image image = img.Image.fromBytes(
     width: width,
     height: height,

@@ -1,22 +1,60 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// One film or paper profile the engine can open.
+/// Where a stock sits in the photographic chain.
+///
+/// The profiles already say this with two fields: `stage` (`filming` or
+/// `printing`) and `support` (`film` or `paper`). A `printing` stock on `film`
+/// is a print/internegative stock — 2383 and 2393 in the shipped bundle — which
+/// is neither a film you shoot nor a paper you print on, so it gets its own
+/// group instead of being hidden.
+enum StockCategory {
+  /// 拍摄胶片：负片、反转片、电影卷。
+  shootFilm,
+
+  /// 相纸：印片用的涂塑相纸。
+  paper,
+
+  /// 印片胶片（拷贝片）：把负片翻制到另一条胶片上，再印到相纸。
+  printFilm,
+}
+
+extension StockCategoryLabel on StockCategory {
+  String get label => switch (this) {
+        StockCategory.shootFilm => '拍摄胶片',
+        StockCategory.paper => '相纸',
+        StockCategory.printFilm => '印片胶片（拷贝片）',
+      };
+
+  String get hint => switch (this) {
+        StockCategory.shootFilm => '决定画面的色彩与颗粒',
+        StockCategory.paper => '决定成品的纸基色调与反差',
+        StockCategory.printFilm => '先翻底再印片，电影拷贝流程',
+      };
+}
+
+/// One film, paper or print-film profile the engine can open.
 class Stock {
   const Stock({
     required this.id,
     required this.name,
     required this.stage,
     required this.support,
+    required this.category,
   });
 
   final String id;
   final String name;
   final String stage;
   final String support;
+  final StockCategory category;
 
-  bool get isFilm => stage == 'filming';
-  bool get isPaper => stage == 'printing' && support == 'paper';
+  /// True for stocks that go in the camera.
+  bool get isFilm => category == StockCategory.shootFilm;
+
+  /// True for anything used at the printing stage — paper *and* print film.
+  bool get isPrintStock =>
+      category == StockCategory.paper || category == StockCategory.printFilm;
 }
 
 /// Lists the profiles under `<resourcesDir>/profiles` without decoding the
@@ -64,16 +102,28 @@ Future<List<Stock>> loadStocks(String resourcesDir) async {
 
   final stocks = <Stock>[
     for (final entry in entries)
-      if (entry.stage != null)
+      if (entry.category != null)
         Stock(
           id: entry.id,
           name: entry.name,
           stage: entry.stage!,
           support: entry.support ?? '',
+          category: entry.category!,
         ),
   ];
   stocks.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   return stocks;
+}
+
+/// Groups stocks by category, keeping [StockCategory.values] order so the
+/// picker always reads film → paper → print film.
+Map<StockCategory, List<Stock>> groupStocks(Iterable<Stock> stocks) {
+  final grouped = <StockCategory, List<Stock>>{};
+  for (final category in StockCategory.values) {
+    final inGroup = stocks.where((stock) => stock.category == category).toList();
+    if (inGroup.isNotEmpty) grouped[category] = inGroup;
+  }
+  return grouped;
 }
 
 class _Entry {
@@ -90,6 +140,12 @@ class _Entry {
   String? stage;
   String? support;
   final String? derivedFrom;
+
+  StockCategory? get category {
+    if (stage == 'filming') return StockCategory.shootFilm;
+    if (stage != 'printing') return null;
+    return support == 'paper' ? StockCategory.paper : StockCategory.printFilm;
+  }
 }
 
 Future<String> _readHead(File file, int bytes) async {
