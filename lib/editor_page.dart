@@ -155,7 +155,12 @@ class _EditorPageState extends State<EditorPage> {
       _sessionOpen && _worker != null && _resourcesDir != null;
 
   Map<String, Object?> _liveDelta() => {
-        'print_exposure': math.pow(2, _exposureEv).toDouble(),
+        // The engine's `print_exposure` is an enlarger *exposure multiplier*:
+        // it scales the light the print gets, so a larger value means a denser
+        // (darker) print. The slider is a brightness control, hence 2^-EV:
+        // `print_exposure = 2^-stops` is the engine's own convention (see
+        // di_live_offsets in digital_intermediate.cpp).
+        'print_exposure': math.pow(2, -_exposureEv).toDouble(),
         'm_filter_shift': _magenta,
         'y_filter_shift': _yellow,
         'filter_shift_scale': _shiftScale,
@@ -1196,23 +1201,12 @@ class _EditorPageState extends State<EditorPage> {
           if (_quality == PreviewQuality.fine) _renderFine();
         },
       ),
-      _sliderRow(
-        theme,
-        label: '预闪',
-        valueLabel: _preflash.toStringAsFixed(2),
-        value: _preflash,
-        min: 0,
-        max: 1,
-        enabled: canRender,
-        onChangeStart: (_) => _pushUndo(),
-        onChanged: (value) {
-          setState(() => _preflash = value);
-          _requestLive();
-        },
-        onChangeEnd: (_) {
-          if (_quality == PreviewQuality.fine) _renderFine();
-        },
-      ),
+      // Pre-flash is intentionally not a slider. The engine's
+      // `preflash_exposure` is a fraction of the film base density applied as
+      // extra light: 1.0 crushes the print to black, and the only visible
+      // effect in a usable range is a slight overall darkening — which the
+      // exposure slider already does better. It stays wired (default 0) for a
+      // future expert mode; see docs/adr or AGENTS.md.
       const Divider(height: 20, color: Color(0xFF23262E)),
       _sliderRow(
         theme,

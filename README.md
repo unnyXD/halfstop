@@ -50,10 +50,15 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 
 | 参数 | 路径 | 体感 |
 |---|---|---|
-| `print_exposure`、`m_filter_shift`、`y_filter_shift`、`preflash_exposure`、`filter_shift_scale` | `spk_set_params` → `spk_reprint("live")` | 复用缓存底片，只重印，拖动中约 100 ms 出帧 |
+| `print_exposure`、`m_filter_shift`、`y_filter_shift`、`filter_shift_scale` | `spk_set_params` → `spk_reprint("live")` | 复用缓存底片，只重印，拖动中约 100 ms 出帧 |
 | 胶片、相纸、颗粒、光晕、眩光 | `spk_set_params` → `spk_reprint("live")` | 会让底片失效，松手才渲染 |
 | 亮度/对比/饱和/色温/色调 | Layer 2 颜色矩阵（GPU） | 一次重绘，不碰引擎 |
 | 曲线 / 色轮（规划中） | Flutter fragment shader | 需要自定义 shader 与 LUT |
+
+**曝光的方向别搞反。** 引擎的 `print_exposure` 是放大机的曝光倍率：值越大，印出来越暗
+（`print_exposure = 2^-stops`，见 `di_live_offsets`）。界面滑块是「亮度」语义，所以发过去
+的参数是 `2^-EV`。同理 `preflash_exposure` 是基密度的比例，1.0 会压成黑片，所以界面上
+不提供这个滑块（参数保留、默认 0）。
 
 `EngineWorker` 把 engine 和 session 常驻在同一个 isolate 里，FFI 指针不跨 isolate；
 UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不堵 UI 线程。
