@@ -6,6 +6,7 @@ import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'engine_bridge.dart';
 import 'layer2.dart';
 
 /// Result of a finished export.
@@ -16,6 +17,7 @@ class ExportedPhoto {
     required this.height,
     required this.bytes,
     required this.inGallery,
+    this.exifTags = 0,
   });
 
   final String path;
@@ -25,6 +27,9 @@ class ExportedPhoto {
 
   /// False when the gallery write failed and the file only lives in app storage.
   final bool inGallery;
+
+  /// How many shooting-data tags came across from the imported file.
+  final int exifTags;
 
   String get sizeLabel {
     final mb = bytes / (1024 * 1024);
@@ -55,6 +60,9 @@ Future<ExportedPhoto> encodeAndSave({
   int? longEdge,
   int quality = 92,
   List<double>? matrix,
+  String? sourcePath,
+  String? make,
+  String? model,
 }) async {
   final encoded = await Isolate.run(
     () => _encodeJpeg(
@@ -70,6 +78,20 @@ Future<ExportedPhoto> encodeAndSave({
   final directory = await getTemporaryDirectory();
   final file = File('${directory.path}/$fileName');
   await file.writeAsBytes(encoded.bytes, flush: true);
+
+  // Shooting data goes on before the gallery write, because `gal` copies the
+  // file: whatever EXIF the temp file has is what the album entry gets.
+  var exifTags = 0;
+  try {
+    exifTags = await EngineBridge.copyExif(
+      source: sourcePath,
+      destination: file.path,
+      make: make,
+      model: model,
+    );
+  } catch (_) {
+    // Losing EXIF should never cost the export itself.
+  }
 
   var inGallery = false;
   try {
@@ -90,6 +112,7 @@ Future<ExportedPhoto> encodeAndSave({
       height: encoded.height,
       bytes: encoded.bytes.length,
       inGallery: false,
+      exifTags: exifTags,
     );
   }
 
@@ -99,6 +122,7 @@ Future<ExportedPhoto> encodeAndSave({
     height: encoded.height,
     bytes: encoded.bytes.length,
     inGallery: inGallery,
+    exifTags: exifTags,
   );
 }
 

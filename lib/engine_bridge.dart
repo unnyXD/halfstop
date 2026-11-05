@@ -194,6 +194,26 @@ class EngineBridge {
   /// Gallery picker for ordinary photos (JPEG / PNG / WebP / BMP).
   static Future<String?> pickImage() => _channel.invokeMethod<String>('pickImage');
 
+  /// Copies shooting data from the imported file onto an exported JPEG.
+  ///
+  /// Returns how many tags were carried over; 0 means the source had none the
+  /// platform could read (a RAW container it does not parse), and [make] /
+  /// [model] from the engine reply were used instead.
+  static Future<int> copyExif({
+    String? source,
+    required String destination,
+    String? make,
+    String? model,
+  }) async {
+    final copied = await _channel.invokeMethod<int>('copyExif', {
+      'source': source,
+      'destination': destination,
+      'make': make,
+      'model': model,
+    });
+    return copied ?? 0;
+  }
+
   /// Imported files still in `cacheDir/imports`, newest first.
   static Future<List<CachedRaw>> cachedRaws() async {
     final list =

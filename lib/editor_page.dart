@@ -566,6 +566,7 @@ class _EditorPageState extends State<EditorPage> {
         );
       }
       stage.value = '编码 JPEG…';
+      final input = (_openInfo['input'] as Map?)?.cast<String, dynamic>() ?? const {};
       final photo = await encodeAndSave(
         pixels: frame.pixels,
         width: frame.width,
@@ -574,6 +575,9 @@ class _EditorPageState extends State<EditorPage> {
         longEdge: options.longEdge,
         quality: options.quality,
         matrix: _layer2.isNeutral ? null : _layer2.matrix,
+        sourcePath: _path,
+        make: input['make'] as String?,
+        model: input['model'] as String?,
       );
       if (!mounted) return;
       if (dialogOpen) Navigator.of(context, rootNavigator: true).pop();
@@ -604,6 +608,13 @@ class _EditorPageState extends State<EditorPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('${photo.width} × ${photo.height} · JPEG · ${photo.sizeLabel}'),
+            const SizedBox(height: 4),
+            Text(
+              photo.exifTags > 0
+                  ? '已写入 ${photo.exifTags} 项拍摄参数'
+                  : '源文件没有可读取的拍摄参数',
+              style: const TextStyle(fontSize: 12, color: _kTextDim),
+            ),
             const SizedBox(height: 10),
             Text(
               photo.inGallery ? '已存入相册 Spektrafilm' : '相册写入失败，文件保存在应用目录',

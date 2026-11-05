@@ -2,6 +2,7 @@ package dev.spektrafilm.spektrafilm_mobile
 
 import android.app.Activity
 import android.content.Intent
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -61,9 +62,76 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "cachedRaws" -> result.success(listCachedRaws())
+                    "copyExif" -> {
+                        val source = call.argument<String>("source")
+                        val destination = call.argument<String>("destination")
+                        if (destination == null) {
+                            result.error("arguments", "destination is required", null)
+                        } else {
+                            try {
+                                result.success(
+                                    copyExif(
+                                        source,
+                                        destination,
+                                        call.argument<String>("make"),
+                                        call.argument<String>("model"),
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                result.error("exif_failed", e.message, null)
+                            }
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Carries the shooting data from the file the user imported onto the JPEG
+     * we just exported.
+     *
+     * ExifInterface reads JPEG, PNG, WebP and the TIFF family (DNG, and ARW in
+     * practice). When it cannot parse a RAW at all, [make] / [model] from the
+     * engine's decode reply still land, so the body is never lost.
+     *
+     * Orientation is deliberately *not* copied: the pipeline already applied
+     * it, so the exported pixels are upright and the tag must say 1.
+     */
+    private fun copyExif(
+        sourcePath: String?,
+        destinationPath: String,
+        make: String?,
+        model: String?,
+    ): Int {
+        val destination = ExifInterface(destinationPath)
+        var copied = 0
+
+        if (sourcePath != null) {
+            try {
+                val source = ExifInterface(sourcePath)
+                for (tag in COPIED_EXIF_TAGS) {
+                    val value = source.getAttribute(tag)
+                    if (value.isNullOrBlank()) continue
+                    destination.setAttribute(tag, value)
+                    copied++
+                }
+            } catch (e: Exception) {
+                // A RAW container ExifInterface does not understand. Not fatal:
+                // fall through to the engine's make/model below.
+            }
+        }
+
+        destination.setAttribute(ExifInterface.TAG_ORIENTATION, "1")
+        if (destination.getAttribute(ExifInterface.TAG_MAKE).isNullOrBlank() && !make.isNullOrBlank()) {
+            destination.setAttribute(ExifInterface.TAG_MAKE, make)
+        }
+        if (destination.getAttribute(ExifInterface.TAG_MODEL).isNullOrBlank() && !model.isNullOrBlank()) {
+            destination.setAttribute(ExifInterface.TAG_MODEL, model)
+        }
+        destination.setAttribute(ExifInterface.TAG_SOFTWARE, "Spektrafilm")
+        destination.saveAttributes()
+        return copied
     }
 
     /**
@@ -226,6 +294,39 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_PICK_IMAGE = 4702
 
         private val PHOTO_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "bmp")
+
+        /**
+         * What survives an export: who took it, with what, and when. Anything
+         * absent from the source is simply not written.
+         */
+        private val COPIED_EXIF_TAGS = listOf(
+            ExifInterface.TAG_MAKE,
+            ExifInterface.TAG_MODEL,
+            ExifInterface.TAG_EXPOSURE_TIME,
+            ExifInterface.TAG_F_NUMBER,
+            ExifInterface.TAG_ISO,
+            ExifInterface.TAG_ISO_SPEED_RATINGS,
+            ExifInterface.TAG_SHUTTER_SPEED_VALUE,
+            ExifInterface.TAG_APERTURE_VALUE,
+            ExifInterface.TAG_FOCAL_LENGTH,
+            ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+            ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+            ExifInterface.TAG_METERING_MODE,
+            ExifInterface.TAG_FLASH,
+            ExifInterface.TAG_WHITE_BALANCE,
+            ExifInterface.TAG_SUBJECT_DISTANCE,
+            ExifInterface.TAG_DATETIME_ORIGINAL,
+            ExifInterface.TAG_DATETIME,
+            ExifInterface.TAG_IMAGE_DESCRIPTION,
+            ExifInterface.TAG_ARTIST,
+            ExifInterface.TAG_COPYRIGHT,
+            ExifInterface.TAG_GPS_LATITUDE,
+            ExifInterface.TAG_GPS_LATITUDE_REF,
+            ExifInterface.TAG_GPS_LONGITUDE,
+            ExifInterface.TAG_GPS_LONGITUDE_REF,
+            ExifInterface.TAG_GPS_ALTITUDE,
+            ExifInterface.TAG_GPS_ALTITUDE_REF,
+        )
 
         private val RAW_EXTENSIONS = setOf(
             "3fr", "arw", "cr2", "cr3", "crw", "dcr", "dng", "erf", "fff", "iiq",

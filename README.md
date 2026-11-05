@@ -22,6 +22,7 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 - [x] `spk_set_params` + `spk_reprint` 实时滑块（5 个打印层参数）
 - [x] 编辑器壳：导入、预览、胶片/相纸、颗粒/光晕/眩光、原图对比、诊断
 - [x] 导出 JPEG（`full` tier → 独立 isolate 编码 → 相册 `Spektrafilm`）
+- [x] 导出保留拍摄参数（EXIF：机身/镜头/ISO/快门/光圈/焦距/时间/GPS/署名）
 - [x] 撤销（20 步，一次滑块拖动合并成一步）
 - [x] 调色层（Layer 2）：亮度/对比/饱和/色温/色调，GPU 颜色矩阵，拖动不回引擎
 - [x] 直方图：从当前帧采样 64k 像素，随调色实时重算
@@ -43,6 +44,15 @@ Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 
 两条路的汇合点是 `spk_open`：它本来就接受一个线性 RGB 缓冲，LibRaw 只是其中最常用的一个
 解码器。相册图片走 `spk_mobile_open_image_on`，直接跳过 LibRaw；之后的胶片、相纸、
 颗粒、光晕、导出完全一致。
+
+## 导出保留拍摄参数
+
+导出的 JPEG 会带上原始文件的 EXIF：机身、镜头、曝光三要素、焦距、拍摄时间、GPS、署名。
+实现走 Android 的 `ExifInterface` 直接读**源文件**（JPEG 与 TIFF 系如 DNG/ARW 都能读），
+再逐标签写进导出文件；读不出来时至少用引擎解码回复里的 make/model 兜底。
+
+`Orientation` 固定写 1：管线已经把方向烘进像素，再复制原方向会让看图软件转两次。
+`Software` 覆盖为 Spektrafilm，其余标签原样保留。
 
 ## 实时调节怎么工作
 
@@ -98,6 +108,7 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 | `lib/layer2.dart` | 调色层：颜色矩阵 + 导出时同一套算式 |
 | `lib/histogram.dart` | 直方图采样与绘制 |
 | `lib/photo_import.dart` | 相册图片 → 线性 ProPhoto RGB（引擎的输入格式） |
+| `android/.../MainActivity.kt` | 资源解压、两个选择器、EXIF 搬运、导入缓存 |
 | `android/app/src/main/cpp/` | `CMakeLists.txt` + FFI 桥 |
 | `android/app/src/main/kotlin/.../MainActivity.kt` | 首次启动解压 `assets/engine/**` |
 | `third_party/spektrafilm/` | 上游引擎（`tool/fetch-engine.ps1` 拉取，不入库） |
