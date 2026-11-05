@@ -128,6 +128,15 @@ class _EditorPageState extends State<EditorPage> {
   /// Frame geometry. Everything here is SHOOT layer in the engine: changing it
   /// re-develops the negative, so these are "commit on release" controls.
   FilmFormat? _format;
+
+  /// Where the gate sits inside the frame. Null means "centred", which is what
+  /// picking a format gives you; dragging the crop window writes here.
+  CropBox? _crop;
+
+  /// Crop mode: the preview shows the whole frame and a movable gate.
+  bool _cropping = false;
+  CropBox _cropDraft = CropBox.full;
+  ui.Image? _cropCanvas;
   bool _overscanOn = false;
   /// `strip` lays out the whole film width, `filed` a sliver of rebate.
   final String _overscanMode = 'strip';
@@ -284,7 +293,8 @@ class _EditorPageState extends State<EditorPage> {
   CropBox get _cropBox {
     final format = _format;
     if (format == null) return CropBox.full;
-    return centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
+    return _crop ??
+        centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
   }
 
   Map<String, Object?> _frameDelta() {
@@ -378,10 +388,15 @@ class _EditorPageState extends State<EditorPage> {
       _history.clear();
       _redoHistory.clear();
       _format = null;
+      _crop = null;
+      _cropping = false;
       _overscanOn = false;
       _dateOn = false;
       _panelExpanded = false;
     });
+    final staleCrop = _cropCanvas;
+    _cropCanvas = null;
+    staleCrop?.dispose();
     image?.dispose();
     source?.dispose();
     unawaited(EngineBridge.cachedRaws().then((cached) {
@@ -393,12 +408,80 @@ class _EditorPageState extends State<EditorPage> {
     if (format?.id == _format?.id) return;
     setState(() {
       _format = format;
+      // A new gate starts centred; the old placement belonged to the old shape.
+      _crop = null;
       if (format == null) {
         _overscanOn = false;
         _datePlacement = 'frame';
       }
     });
     await _applyFrame(label: format == null ? '恢复原比例…' : '按 ${format.label} 重算…');
+  }
+
+  /// Enter crop mode.
+  ///
+  /// The preview on screen is already cropped, so the pixels outside the gate
+  /// are gone. Rather than fake it, ask the engine for the whole frame once —
+  /// that costs a live render — and let the user drag the gate over the real
+  /// image. Confirming renders again with the new placement.
+  Future<void> _beginCrop() async {
+    if (_format == null || !_hasSession || _busy) return;
+    setState(() {
+      _busy = true;
+      _busyLabel = '准备整幅画面…';
+    });
+    try {
+      await _worker!.setParams({
+        ..._liveDelta(),
+        ..._slowDelta(),
+        'geometry_crop_x': 0.0,
+        'geometry_crop_y': 0.0,
+        'geometry_crop_w': 1.0,
+        'geometry_crop_h': 1.0,
+        'film_stock': _film,
+        'print_stock': _paper,
+      });
+      final frame = await _worker!.reprint(tier: 'live');
+      final image = await _imageFromFrame(frame);
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      setState(() {
+        _cropCanvas?.dispose();
+        _cropCanvas = image;
+        _cropDraft = _cropBox;
+        _cropping = true;
+      });
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _busyLabel = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _endCrop({required bool apply}) async {
+    if (!_cropping) return;
+    final canvas = _cropCanvas;
+    setState(() {
+      _cropping = false;
+      _cropCanvas = null;
+      if (apply) _crop = _cropDraft;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => canvas?.dispose());
+    // Either way the engine has the full frame right now and needs telling
+    // which gate to use.
+    await _applyFrame(label: apply ? '应用裁切…' : '恢复裁切…');
+  }
+
+  void _resetCrop() {
+    setState(() => _crop = null);
+    unawaited(_applyFrame(label: '裁切居中…'));
   }
 
   Future<void> _editDateText() async {
@@ -1030,19 +1113,27 @@ class _EditorPageState extends State<EditorPage> {
         child: Column(
           children: [
             _buildHeader(theme),
-            Expanded(child: _buildPreview(theme)),
-            if (_error != null) _buildErrorBar(theme),
-            if (_image != null) _buildPanel(theme),
-            // The action bar belongs to the open sheet. Collapsed, it goes
-            // away and the picture gets the room instead.
-            AnimatedSize(
-              duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
-              child: _image != null && _panelExpanded
-                  ? _buildActionBar(theme)
-                  : const SizedBox(width: double.infinity, height: 0),
+            Expanded(
+              child: _cropping
+                  ? _buildCropPreview(theme)
+                  : _buildPreview(theme),
             ),
+            if (_error != null) _buildErrorBar(theme),
+            if (_cropping)
+              _buildCropBar(theme)
+            else ...[
+              if (_image != null) _buildPanel(theme),
+              // The action bar belongs to the open sheet. Collapsed, it goes
+              // away and the picture gets the room instead.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: _image != null && _panelExpanded
+                    ? _buildActionBar(theme)
+                    : const SizedBox(width: double.infinity, height: 0),
+              ),
+            ],
             SizedBox(height: inset),
           ],
         ),
@@ -1262,6 +1353,128 @@ class _EditorPageState extends State<EditorPage> {
         _panelDrag = 0;
       },
       child: preview,
+    );
+  }
+
+  /// Crop mode.
+  ///
+  /// The window fills most of the viewport and the picture overflows it, the
+  /// way a crop screen is supposed to work: you drag the image, the window
+  /// stays put. Showing the whole frame instead would shrink a 3:2 photo to a
+  /// thumbnail on a phone held upright.
+  Widget _buildCropPreview(ThemeData theme) {
+    final canvas = _cropCanvas;
+    if (canvas == null) return const SizedBox.expand();
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0B0A09), Color(0xFF15120F), _kBackground],
+          stops: [0.0, 0.45, 1.0],
+        ),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final crop = _cropDraft;
+                final frameW = canvas.width.toDouble();
+                final frameH = canvas.height.toDouble();
+                final windowW = crop.width * frameW;
+                final windowH = crop.height * frameH;
+                if (windowW <= 0 || windowH <= 0) {
+                  return const SizedBox.shrink();
+                }
+                // 92%: the picture stays visible on every side of the window,
+                // which is what makes panning legible.
+                final scale = math.min(
+                  box.maxWidth * 0.92 / windowW,
+                  box.maxHeight * 0.92 / windowH,
+                );
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanUpdate: (details) => setState(() {
+                    _cropDraft = _cropDraft.shifted(
+                      details.delta.dx / (frameW * scale),
+                      details.delta.dy / (frameH * scale),
+                    );
+                  }),
+                  child: CustomPaint(
+                    painter: _CropPainter(
+                      image: canvas,
+                      crop: crop,
+                      scale: scale,
+                      origin: Offset(
+                        box.maxWidth / 2 -
+                            (crop.x + crop.width / 2) * frameW * scale,
+                        box.maxHeight / 2 -
+                            (crop.y + crop.height / 2) * frameH * scale,
+                      ),
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Text(
+              '拖动画面 · ${_cropDraft.placementLabel}',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 10.5,
+                color: _kTextDim,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCropBar(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: const BoxDecoration(
+        color: _kSurface,
+        border: Border(top: BorderSide(color: _kLine)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => _endCrop(apply: false),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _kTextDim,
+                side: const BorderSide(color: _kLineStrong),
+                minimumSize: const Size(0, 42),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('取消'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: FilledButton(
+              onPressed: () => _endCrop(apply: true),
+              style: FilledButton.styleFrom(
+                backgroundColor: _kAccent,
+                foregroundColor: const Color(0xFF20160A),
+                minimumSize: const Size(0, 42),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('完成'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2073,7 +2286,7 @@ class _EditorPageState extends State<EditorPage> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
         child: Text(
-          '画幅决定片门尺寸，也决定颗粒相对于画面的粗细；选画幅会按片门比例居中裁剪。',
+          '画幅决定片门尺寸，也决定颗粒相对于画面的粗细；选画幅会按片门比例裁剪，位置可以调。',
           style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.4),
         ),
       ),
@@ -2091,7 +2304,47 @@ class _EditorPageState extends State<EditorPage> {
       ),
       if (format != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: enabled ? _beginCrop : null,
+            // Long-press puts the gate back in the middle without opening the
+            // crop screen.
+            onLongPress: enabled ? _resetCrop : null,
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: _kSurfaceHigh,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _kLine),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.crop_rounded, size: 16, color: _kTextDim),
+                  const SizedBox(width: 10),
+                  Text(
+                    '调整裁切',
+                    style: theme.textTheme.bodySmall?.copyWith(color: _kText),
+                  ),
+                  const Spacer(),
+                  Text(
+                    crop.placementLabel,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 10.5,
+                      color: crop.isCentred ? _kTextDim : _kAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right_rounded, size: 16, color: _kTextDim),
+                ],
+              ),
+            ),
+          ),
+        ),
+      if (format != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: Text(
             '${format.note} · '
             '裁剪保留 ${(crop.width * 100).round()}% × ${(crop.height * 100).round()}%',
@@ -3000,6 +3253,86 @@ class _FrameMarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// The picture under a fixed crop window: the image is drawn at [scale] and
+/// [origin] (which the caller computes so the window sits in the middle), the
+/// outside is dimmed, and the window gets a hairline plus thirds.
+class _CropPainter extends CustomPainter {
+  _CropPainter({
+    required this.image,
+    required this.crop,
+    required this.scale,
+    required this.origin,
+  });
+
+  final ui.Image image;
+  final CropBox crop;
+  final double scale;
+  final Offset origin;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final source = Size(image.width.toDouble(), image.height.toDouble());
+    final destination = Rect.fromLTWH(
+      origin.dx,
+      origin.dy,
+      source.width * scale,
+      source.height * scale,
+    );
+
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.drawImageRect(
+      image,
+      Offset.zero & source,
+      destination,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+
+    final window = Rect.fromCenter(
+      center: size.center(Offset.zero),
+      width: crop.width * source.width * scale,
+      height: crop.height * source.height * scale,
+    );
+
+    final scrim = Path()
+      ..addRect(Offset.zero & size)
+      ..addRect(window)
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(scrim, Paint()..color = const Color(0xB30A0908));
+
+    canvas.drawRect(
+      window,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..color = const Color(0xFFF1EAE0),
+    );
+
+    // Thirds, faint: enough to compose with, not enough to fight the picture.
+    final thirds = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.7
+      ..color = const Color(0x40FFFFFF);
+    for (var i = 1; i < 3; i++) {
+      final dx = window.left + window.width * i / 3;
+      final dy = window.top + window.height * i / 3;
+      canvas.drawLine(Offset(dx, window.top), Offset(dx, window.bottom), thirds);
+      canvas.drawLine(Offset(window.left, dy), Offset(window.right, dy), thirds);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_CropPainter oldDelegate) =>
+      oldDelegate.image != image ||
+      oldDelegate.scale != scale ||
+      oldDelegate.origin != origin ||
+      oldDelegate.crop.x != crop.x ||
+      oldDelegate.crop.y != crop.y ||
+      oldDelegate.crop.width != crop.width ||
+      oldDelegate.crop.height != crop.height;
 }
 
 /// Draws the frame with the Layer 2 colour matrix, keeping the fit the old

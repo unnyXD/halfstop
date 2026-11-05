@@ -141,6 +141,34 @@ class CropBox {
   final double height;
 
   bool get isFull => x == 0 && y == 0 && width == 1 && height == 1;
+
+  /// Room to move on each axis. A crop that already spans the frame has none.
+  double get slackX => (1 - width).clamp(0.0, 1.0);
+  double get slackY => (1 - height).clamp(0.0, 1.0);
+
+  /// The same window moved by (dx, dy) in normalised units, clamped so it
+  /// cannot leave the frame. Axes without slack simply do not move.
+  CropBox shifted(double dx, double dy) => CropBox(
+        (x + dx).clamp(0.0, slackX),
+        (y + dy).clamp(0.0, slackY),
+        width,
+        height,
+      );
+
+  /// Where the window sits inside the available slack: 0.5 is centred.
+  double get positionX => slackX <= 0 ? 0.5 : (x / slackX).clamp(0.0, 1.0);
+  double get positionY => slackY <= 0 ? 0.5 : (y / slackY).clamp(0.0, 1.0);
+
+  bool get isCentred =>
+      (positionX - 0.5).abs() < 0.02 && (positionY - 0.5).abs() < 0.02;
+
+  /// Human-readable placement, e.g. `水平 62% · 垂直 50%`.
+  String get placementLabel {
+    if (isCentred) return '居中';
+    final h = (positionX * 100).round();
+    final v = (positionY * 100).round();
+    return '水平 $h% · 垂直 $v%';
+  }
 }
 
 /// The largest centred crop of a [sourceWidth] × [sourceHeight] frame whose

@@ -4,6 +4,8 @@ import 'package:halfstop/frame_format.dart';
 /// The engine rejects a frame whose aspect is more than 5% off the gate's, so
 /// the crop has to be right before the request is ever sent.
 void main() {
+  _cropPlacementTests();
+
   test('a 3:2 camera frame barely moves for 135, and not at all for 6x9', () {
     // 135's gate is 36.25 × 24.3 — 0.55% off 3:2, so the crop is a sliver.
     final for135 = centreCropForRatio(formatById('135')!.ratio, 6000, 4000);
@@ -75,5 +77,40 @@ void main() {
       '120_6x8', '120_6x9', '135_xpan', '120_6x12', '120_6x17',
     };
     expect(kFilmFormats.map((format) => format.id).toSet(), engineFormats);
+  });
+}
+
+void _cropPlacementTests() {
+  test('a centred crop reports itself as centred', () {
+    final crop = centreCropForRatio(1.0, 6000, 4000); // square gate on 3:2
+    expect(crop.isCentred, isTrue);
+    expect(crop.placementLabel, '居中');
+    expect(crop.positionX, closeTo(0.5, 0.01));
+  });
+
+  test('shifting stops at the edge of the frame', () {
+    final crop = centreCropForRatio(1.0, 6000, 4000);
+    final right = crop.shifted(5, 0);
+    expect(right.x, closeTo(crop.slackX, 1e-9));
+    expect(right.positionX, closeTo(1.0, 1e-9));
+
+    final left = crop.shifted(-5, 0);
+    expect(left.x, closeTo(0.0, 1e-9));
+    expect(left.positionX, closeTo(0.0, 1e-9));
+  });
+
+  test('an axis with no slack does not move', () {
+    // 3:2 gate on a 3:2 frame: nothing to trim, so nothing to pan.
+    final crop = centreCropForRatio(1.5, 6000, 4000);
+    expect(crop.isFull, isTrue);
+    final moved = crop.shifted(0.2, 0.2);
+    expect(moved.x, 0);
+    expect(moved.y, 0);
+  });
+
+  test('the label shows the actual placement once moved', () {
+    final crop = centreCropForRatio(1.0, 6000, 4000).shifted(0.1, 0);
+    expect(crop.isCentred, isFalse);
+    expect(crop.placementLabel, contains('水平'));
   });
 }
