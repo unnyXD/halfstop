@@ -1,113 +1,56 @@
 # 半档 / Halfstop
 
-半档是一个 Android 上的物理胶片模拟器：Flutter 前端 + SpektraLab 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在 Android 上。
-没有 Python，没有服务端，没有 LUT 近似——光谱计算、coupler、颗粒、光晕都在手机 GPU 上算。
+Android 上的物理胶片模拟相机后期应用。Flutter 前端 + [SpektraLab](https://github.com/SAINTTaiYi/SpektraLab-Android) 的 C++20 / Vulkan 渲染引擎，通过 `dart:ffi` 直接跑在手机上——没有 Python，没有服务端，没有 LUT 近似，光谱计算、coupler、颗粒、光晕全部在 GPU 上现场算。
 
 ![引擎自检](docs/engine-selftest.png)
 
-## 当前状态
+## 功能
 
-已经把整条原生链路打通，并在这台机器上完成 release 构建：
+**胶片模拟**
 
-- [x] NDK 编译 C++20 引擎（`libspektrafilm.so`，arm64-v8a）
-- [x] 49 个 Vulkan compute shader 用 NDK 自带 `glslc` 编译成 SPIR-V
-- [x] `volk` 在 Android 上加载 `libvulkan.so`
-- [x] 引擎 math probe 通过（`math=probed`、`render_core=native-vulkan`）
-- [x] 28 个胶片 profile + 相纸 + 打印 LUT 作为 assets 打包，首次启动解压到 `filesDir`
-- [x] Flutter UI ↔ `dart:ffi` ↔ C ABI（参数走 JSON）
-- [x] debug / release APK 都能在 Adreno 650 上启动并创建引擎
-- [x] 两个导入入口：相册图片（Dart 解码 → 直送引擎）与 RAW（LibRaw）
-- [x] RAW 解码（LibRaw 0.22.2，NDK/CMake 原生）
-- [x] 常驻 engine + session（`EngineWorker`，后台 isolate）
-- [x] `spk_set_params` + `spk_reprint` 实时滑块（5 个打印层参数）
-- [x] 编辑器壳：导入、预览、胶片/相纸、颗粒/光晕/眩光、原图对比、诊断
-- [x] 导出 JPEG（`full` tier → 独立 isolate 编码 → 相册 `Spektrafilm`）
-- [x] 导出保留拍摄参数（EXIF：机身/镜头/ISO/快门/光圈/焦距/时间/GPS/署名）
-- [x] 撤销（20 步，一次滑块拖动合并成一步）
-- [x] 画幅：135 / 半格 / XPan / 645 / 6×6 / 6×7 / 6×8 / 6×9 / 6×12 / 6×17，选画幅自动按片门比例裁剪
-- [x] 裁切：四角四边自由拉拽、双指缩放、拖动平移；开「片边」时比例自动锁回片门
-- [x] 片边与齿孔：整条胶片边缘、上下齿孔（白/黑）、片基外（无/黑场/透光）、边雾与漏光
-- [x] 日期后背：把日期烧进画面或片边，三种字面（液晶/点阵/数据）
-- [x] 模拟强度：成品与原图线性混合，拖动零延迟，导出时按同一比例烘进 JPEG
-- [x] 胶片列表按 profile 自带的 `stage`/`support` 分类：拍摄胶片 / 相纸 / 印片胶片（拷贝片）
-- [x] 调色层（Layer 2）：亮度/对比/饱和/色温/色调，GPU 颜色矩阵，拖动不回引擎
-- [x] 直方图：从当前帧采样 64k 像素，随调色实时重算
-- [x] 测光：每帧算平均亮度 / 高光与暗部裁切 / 建议曝光，一键「自动」落到曝光滑块
+- 28 个胶片 profile（光谱实测数据，非风格化 LUT）：25 款拍摄胶片、7 款相纸、2 款电影拷贝片（2383 / 2393）
+- 相纸决定纸基色调与反差，拷贝片走「先翻底再印片」的电影流程——分类来自 profile 自带的 `stage` / `support` 字段
+- 模拟强度：原图与成片线性混合，导出按同一算式烘进 JPEG，拖到 40% 导出的就是 40%
 
-还要做 / 待真机验证：
+**画幅与构图**
 
-- [ ] 真机跑通「导入 RAW → 调参 → 导出」全链路（构建通过，运行待设备）
-- [ ] 导出 TIFF / DNG
-- [ ] 曲线、色轮、裁剪、直方图
-- [ ] 多机型验证（Mali / PowerVR / 其他 Adreno）
+- 10 种画幅：135 / 半格 / XPan / 645 / 6×6 / 6×7 / 6×8 / 6×9 / 6×12 / 6×17
+- 裁切采用常规修图交互：画幅框固定不动，双指缩放照片、单指拖动构图，缩放倍率实时显示
+- 开启「片边与齿孔」时画面自动回到片门形状（胶片边缘画出来时片门必须是真的）
+- 片边与齿孔：整条胶片边缘、上下齿孔（白/黑）、片基外（无/黑场/透光）、边雾与漏光；边字与帧号来自 profile，不是画的
+- 日期后背：把日期烧进画面或片边，三种字面（液晶/点阵/数据）
 
-## 胶片分三类
+**调整与输出**
 
-分类不是我编的，是 profile 里本来就有的两个字段：
+- 打印层实时滑块：曝光、品/黄滤色、滤色强度，拖动约 100 ms 出帧（复用缓存底片，只重印）
+- 调色层（Layer 2）：亮度/对比/饱和/色温/色调，GPU 颜色矩阵，不碰引擎
+- 测光：每帧算平均亮度、高光与暗部裁切、建议曝光，一键「自动」落到曝光滑块
+- 直方图：从当前帧采样 64k 像素，随调色实时重算
+- 撤销 20 步，一次滑块拖动合并成一步
+- 导出 JPEG 到相册，保留原始拍摄参数（EXIF：机身/镜头/ISO/快门/光圈/焦距/时间/GPS/署名）
 
-| 分组 | `stage` | `support` | 数量 | 作用 |
-|---|---|---|---|---|
-| 拍摄胶片 | `filming` | `film` | 25 | 决定画面色彩与颗粒 |
-| 相纸 | `printing` | `paper` | 7 | 决定纸基色调与反差 |
-| 印片胶片（拷贝片） | `printing` | `film` | 2 | 先翻底再印片，电影拷贝流程（2383 / 2393） |
-
-之前把后两类混成一个「相纸」下拉框，两个电影拷贝片就这么被当成相纸了。
-
-## 画幅、片边、日期
-
-这三样都是引擎的 SHOOT 层——改一次就要重新显影底片，所以在 UI 里是「点一下、等一次」，
-不是拖动。实测 135 画幅 + 片边 + 日期：**1666 × 1539，2102 ms**。
-
-画幅有个必须一起做的事：引擎要求画面比例与片门一致（±5%），否则直接报错。所以选画幅时
-会按 `kFormats` 的比例居中裁剪，`lib/frame_format.dart` 里那张表和 `overscan.cpp` 对得上。
-
-片边会带出厂家的边字和帧号（Kodak 的橙色字、`1A`、帧号 `2`），这些来自 profile，不是画的。
-
-## 模拟强度
-
-引擎没有「半卷胶片」这种概念，所以强度是**合成**而不是参数：原图铺底、成片按比例叠上去。
-预览走 GPU 一次重绘，导出走同一条算式（`source*(1-k) + render*k`），所以拖到 40% 导出的
-就是 40%，不是 100%。
-
-## 两个入口
+**导入**
 
 | 入口 | 解码 | 引擎看到的东西 |
 |---|---|---|
-| 从相册选择（JPEG / PNG / WebP / BMP） | Dart 的 `image` 包，纠 EXIF 方向，长边不超过 4096 | 线性 ProPhoto RGB float32 |
-| RAW 文件（ARW / DNG / CR2 / CR3 / NEF / RAF / ORF…） | LibRaw 0.22.2，16 bit 兼容解码 | 同上 |
+| 相册图片（JPEG / PNG / WebP / BMP） | Dart `image` 包，纠 EXIF 方向，长边 ≤ 4096 | 线性 ProPhoto RGB float32 |
+| RAW（ARW / DNG / CR2 / CR3 / NEF / RAF / ORF…） | LibRaw 0.22.2，NDK 原生编译，16 bit | 同上 |
 
-两条路的汇合点是 `spk_open`：它本来就接受一个线性 RGB 缓冲，LibRaw 只是其中最常用的一个
-解码器。相册图片走 `spk_mobile_open_image_on`，直接跳过 LibRaw；之后的胶片、相纸、
-颗粒、光晕、导出完全一致。
+两条路的汇合点是 `spk_open`：引擎本来就接受线性 RGB 缓冲，相册图片走 `spk_mobile_open_image_on` 跳过 LibRaw，之后的渲染链路完全一致。
 
-## 导出保留拍摄参数
+## 实时性怎么来的
 
-导出的 JPEG 会带上原始文件的 EXIF：机身、镜头、曝光三要素、焦距、拍摄时间、GPS、署名。
-实现走 Android 的 `ExifInterface` 直接读**源文件**（JPEG 与 TIFF 系如 DNG/ARW 都能读），
-再逐标签写进导出文件；读不出来时至少用引擎解码回复里的 make/model 兜底。
-
-`Orientation` 固定写 1：管线已经把方向烘进像素，再复制原方向会让看图软件转两次。
-`Software` 覆盖为 Spektrafilm，其余标签原样保留。
-
-## 实时调节怎么工作
-
-引擎把参数分成两类，UI 也按两类处理：
+引擎把参数分成两类，UI 按两类处理：
 
 | 参数 | 路径 | 体感 |
 |---|---|---|
-| `print_exposure`、`m_filter_shift`、`y_filter_shift`、`filter_shift_scale` | `spk_set_params` → `spk_reprint("live")` | 复用缓存底片，只重印，拖动中约 100 ms 出帧 |
-| 胶片、相纸、颗粒、光晕、眩光 | `spk_set_params` → `spk_reprint("live")` | 会让底片失效，松手才渲染 |
-| 亮度/对比/饱和/色温/色调 | Layer 2 颜色矩阵（GPU） | 一次重绘，不碰引擎 |
-| 曲线 / 色轮（规划中） | Flutter fragment shader | 需要自定义 shader 与 LUT |
+| 曝光 / 滤色 | `spk_set_params` → `spk_reprint("live")` | 复用缓存底片只重印，拖动约 100 ms |
+| 胶片 / 相纸 / 颗粒 / 光晕 | 同上 | 底片失效，松手才渲染 |
+| 调色五项 | Layer 2 颜色矩阵（GPU） | 一次重绘，不进引擎 |
 
-**曝光的方向别搞反。** 引擎的 `print_exposure` 是放大机的曝光倍率：值越大，印出来越暗
-（`print_exposure = 2^-stops`，见 `di_live_offsets`）。界面滑块是「亮度」语义，所以发过去
-的参数是 `2^-EV`。同理 `preflash_exposure` 是基密度的比例，1.0 会压成黑片，所以界面上
-不提供这个滑块（参数保留、默认 0）。
+`EngineWorker` 把 engine 和 session 常驻在同一个 isolate，FFI 指针不跨 isolate；UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永不堵 UI 线程。拖动时 90 ms 防抖 + 「只保留最新一帧」合并请求。
 
-`EngineWorker` 把 engine 和 session 常驻在同一个 isolate 里，FFI 指针不跨 isolate；
-UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不堵 UI 线程。
-拖动时 UI 侧 90 ms 防抖 + “渲染中只保留最新一帧”合并，避免请求堆积。
+**曝光方向别搞反**：引擎的 `print_exposure` 是放大机曝光倍率，值越大印出来越暗（`print_exposure = 2^-stops`）。界面滑块是「亮度」语义，发过去的参数是 `2^-EV`。
 
 ## 架构
 
@@ -122,113 +65,58 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 │  libspektrafilm.so                                          │
 │  ├─ spk_mobile.cpp   探针 + 会话/参数/渲染 C ABI            │
 │  └─ engine/          spektralab_core + pipeline + Vulkan    │
-│         │                                                   │
-│         ├─ Vulkan compute (Adreno / Mali / …)               │
+│         ├─ Vulkan compute (49 个 SPIR-V shader)             │
 │         └─ assets/engine/** → filesDir/engine/**           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-关键约定来自上游引擎，也是为什么 Android 移植能这么薄：
+三条来自上游引擎的关键约定，也是 Android 移植能这么薄的原因：
 
-- **参数走 JSON，像素走 buffer。** 界面加一个滑块不需要改 FFI 签名。
-- **引擎不写文件。** 它只返回 RGBA16 像素，Dart 侧自己编码。
-- **两层渲染。** Layer 1（胶片/相纸/放大机）在引擎里，Layer 2（曝光/曲线/白平衡）留给 Flutter 的 fragment shader，滑块才能跟手。
-
-## 目录
-
-| 路径 | 内容 |
-|---|---|
-| `lib/` | Dart 代码 |
-| `lib/exporter.dart` | JPEG 编码 + 相册落盘 |
-| `lib/layer2.dart` | 调色层：颜色矩阵 + 导出时同一套算式 |
-| `lib/histogram.dart` | 直方图采样与绘制 |
-| `lib/photo_import.dart` | 相册图片 → 线性 ProPhoto RGB（引擎的输入格式） |
-| `android/.../MainActivity.kt` | 资源解压、两个选择器、EXIF 搬运、导入缓存 |
-| `android/app/src/main/cpp/` | `CMakeLists.txt` + FFI 桥 |
-| `android/app/src/main/kotlin/.../MainActivity.kt` | 首次启动解压 `assets/engine/**` |
-| `third_party/spektrafilm/` | 上游引擎（`tool/fetch-engine.ps1` 拉取，不入库） |
-| `tool/` | 拉源码、编 shader、环境变量脚本 |
-| `tool/gen-icon.py` | 生成全部启动器图标（含自适应前景与单色版） |
-
-## 图标
-
-图标是代码画的，不是图片素材：`python tool/gen-icon.py` 会重写所有密度。母版是一个
-1024 单位的画布，先整体画完再缩放，所以 48 px 和 192 px 的线宽视觉一致。
-
-| 输出 | 用途 |
-|---|---|
-| `mipmap-*/ic_launcher.png` | 旧启动器（全出血方块） |
-| `mipmap-*/ic_launcher_round.png` | 旧圆形启动器 |
-| `mipmap-*/ic_launcher_foreground.png` | 自适应前景（透明，图形收在 66 dp 安全圆内） |
-| `mipmap-*/ic_launcher_monochrome.png` | Android 13+ 主题图标 |
-| `mipmap-anydpi-v26/` `-v33/` | 把上面这些拼成自适应图标 |
-
-**注意**：`gen-icon.py` 里的坐标是 1024 设计空间，不要再乘一次超采样倍数——上一版就是
-这么把图形画到画布外，结果图标成了一个纯黑方块。
+- **参数走 JSON，像素走 buffer**——界面加滑块不需要改 FFI 签名
+- **引擎不写文件**——只返回 RGBA16 像素，Dart 侧自己编码
+- **两层渲染**——Layer 1（胶片/相纸/放大机）在引擎里，Layer 2（调色）留给 Flutter，滑块才能跟手
 
 ## 构建
 
-### 1. 工具链
-
-需要 Flutter stable、JDK 17、Android SDK（platform 36）、**NDK 28.2.13676358**、CMake 3.22.1。
-NDK 必须带 `shader-tools/<host>/glslc`（NDK 26+ 都有）。
-
-本机这套便携工具链在**工作区之外**：`C://toolchains//flutter-android`，任何项目都不再持有它。
-用 `tool/env.ps1` 引入：
+需要 Flutter stable、JDK 17、Android SDK（platform 36）、**NDK 28.2.13676358**（必须带 `glslc`）、CMake 3.22.1。
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
+# 1. 工具链环境（或自行设置 SPK_TOOLCHAIN 指向含 flutter/ jdk/ android-sdk/ 的目录）
 . .\tool\env.ps1
-```
 
-或者自己设 `SPK_TOOLCHAIN` 指向包含 `flutter/`、`jdk/`、`android-sdk/` 的目录。
-直接 `. C://toolchains//flutter-android//env.ps1` 也可以，两个项目共用同一套环境变量。
+# 2. 拉引擎 + 编 shader（固定到上游 Windows_Linux 分支的一个 commit）
+.\tool\fetch-engine.ps1      # 首次
+.\tool\build-shaders.ps1     # 49 个 .comp -> SPIR-V；Gradle 也会自动跑
 
-### 2. 拉引擎 + 编 shader
-
-```powershell
-.\tool\fetch-engine.ps1      # 首次；固定到 Windows_Linux 分支的一个 commit
-.\tool\build-shaders.ps1     # 49 个 .comp -> 444 kB SPIR-V
-```
-
-Gradle 也会自动跑 `build-shaders.ps1`，只有 shader 改动时才重编。
-
-### 3. 跑
-
-```powershell
+# 3. 跑
 flutter run --release
 # 或
 flutter build apk --release --target-platform android-arm64
 adb install -r build\app\outputs\flutter-apk\app-release.apk
 ```
 
-产物体积（release，arm64）：**33.6 MB**，其中引擎约 3.3 MB（未裁剪）、Flutter 约 11 MB、
-Dart 约 4 MB、引擎数据（profile + SPIR-V + 打印 LUT）约 12 MB。
+release（arm64）产物约 **33.6 MB**：引擎约 3.3 MB、Flutter 约 11 MB、Dart 约 4 MB、引擎数据（profile + SPIR-V + 打印 LUT）约 12 MB。
+
+测试：`flutter test`（39 条，覆盖画幅/裁切几何、调色矩阵、测光、导入、目录）。
 
 ## 已验证
 
 | | |
 |---|---|
-| 设备 | Xiaomi M2012K11AC（Redmi K40 / Snapdragon 870） |
+| 设备 | Xiaomi Redmi K40（Snapdragon 870） |
 | GPU | Adreno 650，Vulkan 1.1.295，driver 512.837.7 |
-| 结果 | `引擎就绪`，`math=probed`，`max_mp=151.3`，`live=1600`，`preview=3400` |
+| 结果 | 引擎就绪，`math=probed`，实时滑块 ~100 ms，135+片边+日期 1666×1539 约 2.1 s |
 
-上表是上一版自检页在真机上的结果。当前编辑器版本已完成 `flutter analyze`、`flutter test`
-和 release APK 构建；真机上的完整“导入 RAW → 实时滑块 → 精细预览”链路还需要一台设备复验。
+## Roadmap
 
-## 接下来
-
-1. **真机复验**：安装 `build/app/outputs/flutter-apk/app-release.apk`，导入一张 RAW，
-   确认首帧、拖动 `print_exposure` 时的帧率和 `reprint=true`。
-2. **导出**：JPEG（先 Dart 编码，后续换原生 libjpeg）、TIFF、DNG。
-3. **Layer 2**：曝光/曲线/白平衡/裁剪放到 Flutter fragment shader，做到 60 fps 跟手。
-4. **内存与降级**：按 `max_storage_buffer_range` 限制导入像素数，低端机自动降 `preview_long_edge`。
-5. **UI 完整度**：曲线、色轮、直方图、撤销、画幅、批量导出。
+- [ ] 导出 TIFF / DNG
+- [ ] 曲线、色轮（Flutter fragment shader）
+- [ ] 多机型验证（Mali / PowerVR / 其他 Adreno）
+- [ ] 低端机降级（按 `max_storage_buffer_range` 限像素，自动降 `preview_long_edge`）
 
 ## 许可
 
-- 引擎、胶片模型、28 个 profile：**GPL-3.0-or-later**（上游 spektrafilm / SpektraLab）。
-  任何分发版本都必须以 GPLv3 开源。
-- 胶片/相纸 profile 与打印 LUT：**CC BY-SA 4.0**。
-- Android 移植代码同样按 **GPL-3.0-or-later** 发布，并保留上游署名。
-- **不要使用 “SpektraLab” 这个名字和图标**——那是上游作者的商标（注册中）。发布时请自命名并在说明里注明 “based on SpektraLab / spektrafilm”。
+- 引擎、胶片模型、profile：**GPL-3.0-or-later**（上游 spektrafilm / SpektraLab），任何分发版本必须以 GPLv3 开源
+- 胶片/相纸 profile 与打印 LUT：**CC BY-SA 4.0**
+- 本移植代码同样按 **GPL-3.0-or-later** 发布，保留上游署名
+- 上游的 “SpektraLab” 名称与图标是原作者商标，本项目未使用；本项目基于 SpektraLab / spektrafilm 引擎
