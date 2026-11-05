@@ -2399,6 +2399,22 @@ class _FrameMarkPainter extends CustomPainter {
         x += holeW + gap;
       }
     }
+
+    // The same half disc as the launcher icon: one shape means the same thing
+    // in both places.
+    // Radius 7.5 against the 32-high gate keeps the same disc-to-gate ratio as
+    // the launcher icon (47%), so the mark and the icon read as one design.
+    final disc = Rect.fromCircle(
+      center: Offset(size.width / 2, gate.center.dy),
+      radius: 7.5,
+    );
+    final discLine = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = amber.withValues(alpha: 0.75);
+    final discFill = Paint()..color = amber.withValues(alpha: 0.55);
+    canvas.drawArc(disc, -math.pi / 2, math.pi * 2, false, discLine);
+    canvas.drawArc(disc, math.pi / 2, math.pi, true, discFill);
   }
 
   @override

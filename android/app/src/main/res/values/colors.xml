@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same warm black as the app background, so the splash and the adaptive
+         icon plate match the UI instead of flashing white. -->
+    <color name="ic_launcher_background">#0A0908</color>
+    <color name="splash_background">#0A0908</color>
+</resources>

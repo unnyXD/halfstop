@@ -146,6 +146,23 @@ UI 发 JSON 命令，像素用 `TransferableTypedData` 传回，渲染永远不�
 | `android/app/src/main/kotlin/.../MainActivity.kt` | 首次启动解压 `assets/engine/**` |
 | `third_party/spektrafilm/` | 上游引擎（`tool/fetch-engine.ps1` 拉取，不入库） |
 | `tool/` | 拉源码、编 shader、环境变量脚本 |
+| `tool/gen-icon.py` | 生成全部启动器图标（含自适应前景与单色版） |
+
+## 图标
+
+图标是代码画的，不是图片素材：`python tool/gen-icon.py` 会重写所有密度。母版是一个
+1024 单位的画布，先整体画完再缩放，所以 48 px 和 192 px 的线宽视觉一致。
+
+| 输出 | 用途 |
+|---|---|
+| `mipmap-*/ic_launcher.png` | 旧启动器（全出血方块） |
+| `mipmap-*/ic_launcher_round.png` | 旧圆形启动器 |
+| `mipmap-*/ic_launcher_foreground.png` | 自适应前景（透明，图形收在 66 dp 安全圆内） |
+| `mipmap-*/ic_launcher_monochrome.png` | Android 13+ 主题图标 |
+| `mipmap-anydpi-v26/` `-v33/` | 把上面这些拼成自适应图标 |
+
+**注意**：`gen-icon.py` 里的坐标是 1024 设计空间，不要再乘一次超采样倍数——上一版就是
+这么把图形画到画布外，结果图标成了一个纯黑方块。
 
 ## 构建
 
