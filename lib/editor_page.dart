@@ -110,6 +110,10 @@ class _EditorPageState extends State<EditorPage> {
   Layer2Params _layer2 = Layer2Params.neutral;
   Uint8List? _framePixels;
   Histogram? _histogram;
+
+  /// Meter reading for the frame on screen. Recomputed with the histogram, so
+  /// it follows a film change or a strength change without any extra pass.
+  Metering _metering = Metering.empty;
   bool _showHistogram = true;
   _PanelLayer _panelLayer = _PanelLayer.exposure;
 
@@ -367,6 +371,7 @@ class _EditorPageState extends State<EditorPage> {
       _path = null;
       _openInfo = const {};
       _histogram = null;
+      _metering = Metering.empty;
       _framePixels = null;
       _imageWidth = 0;
       _imageHeight = 0;
@@ -925,6 +930,7 @@ class _EditorPageState extends State<EditorPage> {
       _showingSource = false;
       _framePixels = frame.pixels;
       _histogram = Histogram.fromRgba8(frame.pixels, matrix: _layer2.matrix);
+      _metering = Metering.fromHistogram(_histogram!);
       if (fast) {
         _liveFrames++;
         _lastLiveMs = wallMs ?? frame.renderMs?.round() ?? 0;
@@ -1933,6 +1939,92 @@ class _EditorPageState extends State<EditorPage> {
     );
   }
 
+  /// The meter: how the frame currently sits, and a one-tap fix. It updates
+  /// with every rendered frame, so changing the film or the strength moves the
+  /// numbers while you watch.
+  Widget _meterStrip(ThemeData theme, bool canRender) {
+    final meter = _metering;
+    final ready = canRender && !meter.isEmpty;
+    String pct(double value) {
+      final percent = value * 100;
+      return percent >= 10
+          ? '${percent.round()}%'
+          : '${percent.toStringAsFixed(1)}%';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 0),
+      child: Row(
+        children: [
+          Icon(
+            Icons.center_focus_weak_rounded,
+            size: 14,
+            color: ready ? _kAccent : _kTextDim.withValues(alpha: 0.5),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '测光',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10.5,
+              color: _kTextDim,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              ready
+                  ? '平均 ${pct(meter.mean)} · 高光 ${pct(meter.highlights)} · 暗部 ${pct(meter.shadows)}'
+                  : '等待画面…',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 10.5,
+                color: _kTextDim,
+                fontFeatures: const [ui.FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          if (ready && meter.needsExposure)
+            GestureDetector(
+              onTap: _autoExposure,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _kAccent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: _kAccent.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.auto_fix_high_rounded, size: 12, color: _kAccent),
+                    const SizedBox(width: 5),
+                    Text(
+                      '自动 ${meter.suggestedEv >= 0 ? '+' : ''}'
+                      '${meter.suggestedEv.toStringAsFixed(2)} EV',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 10.5,
+                        color: _kAccent,
+                        fontFeatures: const [ui.FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (ready)
+            Text(
+              '已对齐',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 10,
+                color: _kTextDim.withValues(alpha: 0.7),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// Section label with its own reset, the way the design groups controls.
   Widget _sectionHeader(
     ThemeData theme,
@@ -1977,7 +2069,7 @@ class _EditorPageState extends State<EditorPage> {
     final crop = _cropBox;
 
     return [
-      _sectionHeader(theme, '画幅', onReset: enabled ? _resetFrame : null),
+      _sectionHeader(theme, '片门', onReset: enabled ? _resetFrame : null),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
         child: Text(
@@ -1989,7 +2081,7 @@ class _EditorPageState extends State<EditorPage> {
         height: 34,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           children: [
             _formatChip(theme, null, '原图', enabled),
             for (final option in kFilmFormats)
@@ -2152,7 +2244,7 @@ class _EditorPageState extends State<EditorPage> {
     required ValueChanged<bool> onChanged,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
       child: Row(
         children: [
           Expanded(
@@ -2201,11 +2293,11 @@ class _EditorPageState extends State<EditorPage> {
     ValueChanged<String> onChanged,
   ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
       child: Row(
         children: [
           SizedBox(
-            width: 58,
+            width: 54,
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
@@ -2245,11 +2337,11 @@ class _EditorPageState extends State<EditorPage> {
     return InkWell(
       onTap: enabled ? onTap : null,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
         child: Row(
           children: [
             SizedBox(
-              width: 58,
+              width: 54,
               child: Text(
                 label,
                 style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
@@ -2326,6 +2418,7 @@ class _EditorPageState extends State<EditorPage> {
           ],
         ),
       ),
+      _meterStrip(theme, canRender),
       _sliderRow(
         theme,
         label: '曝光',
@@ -2457,6 +2550,19 @@ class _EditorPageState extends State<EditorPage> {
         onChangeEnd: (_) => _applySlow(),
       ),
     ];
+  }
+
+  /// Apply the meter's suggestion to the exposure slider. One tap, one undo
+  /// step, and the engine reprints as usual.
+  void _autoExposure() {
+    if (!_hasSession || _busy || _metering.isEmpty) return;
+    final next = (_exposureEv + _metering.suggestedEv).clamp(-4.0, 4.0);
+    if ((next - _exposureEv).abs() < 0.01) return;
+    _pushUndo();
+    setState(() => _exposureEv = next);
+    unawaited(HapticFeedback.selectionClick());
+    _requestLive();
+    if (_quality == PreviewQuality.fine) _renderFine();
   }
 
   void _resetGrain() {
@@ -2805,6 +2911,7 @@ class _EditorPageState extends State<EditorPage> {
       _layer2 = next;
       if (pixels != null) {
         _histogram = Histogram.fromRgba8(pixels, matrix: next.matrix);
+        _metering = Metering.fromHistogram(_histogram!);
       }
     });
   }

@@ -74,6 +74,102 @@ class Histogram {
   }
 }
 
+/// A light-meter reading taken from one rendered frame.
+///
+/// This is what the meter in a film-simulation app is for: the engine has
+/// already decided the look, so the honest question is "how is this frame
+/// sitting?" — mean level, how much is clipping at each end, and how far the
+/// exposure would have to move to put the mean on a mid-grey target.
+///
+/// Computing it from the histogram (rather than the pixels again) costs
+/// nothing: the bins are already there for the graph.
+@immutable
+class Metering {
+  const Metering({
+    required this.mean,
+    required this.shadows,
+    required this.highlights,
+    required this.suggestedEv,
+  });
+
+  /// Mean luminance, 0..1.
+  final double mean;
+
+  /// Fraction of samples sitting in the clipped bins at either end.
+  final double shadows;
+  final double highlights;
+
+  /// Exposure offset that would bring [mean] to [target], clamped to what the
+  /// exposure slider can actually do.
+  final double suggestedEv;
+
+  /// A pleasing mid-tone for a print, a little above 18% grey.
+  static const double target = 0.46;
+
+  static const Metering empty =
+      Metering(mean: 0, shadows: 0, highlights: 0, suggestedEv: 0);
+
+  bool get isEmpty => mean <= 0;
+
+  /// Whether the frame is far enough off target for the suggestion to matter.
+  bool get needsExposure => suggestedEv.abs() >= 0.1;
+
+  static Metering fromHistogram(Histogram histogram) {
+    if (histogram.isEmpty) return empty;
+
+    final red = histogram.red;
+    final green = histogram.green;
+    final blue = histogram.blue;
+    final bins = red.length;
+    if (bins == 0) return empty;
+
+    var total = 0;
+    var sumR = 0.0, sumG = 0.0, sumB = 0.0;
+    var dark = 0;
+    var bright = 0;
+    // Clipping is an absolute property of the code values, not a percentage
+    // of the histogram: the bottom three and top three bins are where detail
+    // is actually gone.
+    const darkEdge = 2;
+    final brightEdge = bins - 3;
+
+    for (var i = 0; i < bins; i++) {
+      final r = red[i], g = green[i], b = blue[i];
+      final count = r + g + b;
+      if (count == 0) continue;
+      total += count;
+      sumR += i * r;
+      sumG += i * g;
+      sumB += i * b;
+      if (i <= darkEdge) dark += count;
+      if (i >= brightEdge) bright += count;
+    }
+    if (total == 0) return empty;
+
+    final scale = 255.0 * (total / 3);
+    final luma = (0.2126 * sumR + 0.7152 * sumG + 0.0722 * sumB) / scale;
+    final mean = luma.clamp(0.0, 1.0);
+
+    // A pure black or pure white frame has no ratio to take a log of, but it
+    // still deserves a suggestion: the slider stops at ±2 anyway.
+    var ev = mean <= 0.002
+        ? 2.0
+        : mean >= 0.998
+            ? -2.0
+            : (math.log(target / mean) / math.ln2);
+    ev = ev.clamp(-2.0, 2.0);
+    // Quarter-stop steps: the readout is a suggestion, not a measurement.
+    ev = (ev * 4).roundToDouble() / 4;
+
+    return Metering(
+      mean: mean,
+      shadows: dark / total,
+      highlights: bright / total,
+      suggestedEv: ev,
+    );
+  }
+}
+
 /// The little RGB histogram drawn over the preview corner.
 class HistogramView extends StatelessWidget {
   const HistogramView({super.key, required this.data, this.width = 104, this.height = 40});
