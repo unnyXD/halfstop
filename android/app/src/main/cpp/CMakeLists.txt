@@ -85,6 +85,10 @@ target_include_directories(spektrafilm PRIVATE
 target_link_libraries(spektrafilm PRIVATE
     spektralab_engine
     spk_image_io
+    # Directly, for the embedded JPEG preview the home grid shows as a tile:
+    # `spk_image_io` links LibRaw privately, so its headers are not visible
+    # here, and `unpack_thumb` is a header read, not a decode.
+    spk_libraw
     spk_volk
     android
     log)

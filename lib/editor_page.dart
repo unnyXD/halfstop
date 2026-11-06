@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -223,6 +224,7 @@ class _EditorPageState extends State<EditorPage> {
         }
         _booting = false;
       });
+      unawaited(_ensureThumbnails());
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -481,7 +483,9 @@ class _EditorPageState extends State<EditorPage> {
     image?.dispose();
     source?.dispose();
     unawaited(EngineBridge.cachedRaws().then((cached) {
-      if (mounted) setState(() => _cached = cached);
+      if (!mounted) return;
+      setState(() => _cached = cached);
+      unawaited(_ensureThumbnails());
     }));
   }
 
@@ -701,6 +705,41 @@ class _EditorPageState extends State<EditorPage> {
       _cached = cached;
       if (_path == entry.path) _path = null;
     });
+    unawaited(_ensureThumbnails());
+  }
+
+  /// Writes any missing preview for the home grid.
+  ///
+  /// A RAW already carries a JPEG its camera made; LibRaw hands it over without
+  /// decoding (tens of milliseconds each), which is why the grid can be
+  /// populated the first time the app opens rather than after a render.
+  Future<void> _ensureThumbnails() async {
+    final missing = _cached
+        .where((entry) =>
+            !entry.isPhoto && (entry.thumb == null || entry.thumb!.isEmpty))
+        .toList();
+    if (missing.isEmpty) return;
+    var wrote = false;
+    for (final entry in missing) {
+      final slash = entry.path.lastIndexOf('/');
+      if (slash <= 0) continue;
+      final directory = Directory('${entry.path.substring(0, slash)}/.thumbs');
+      try {
+        if (!directory.existsSync()) directory.createSync(recursive: true);
+      } on FileSystemException {
+        continue;
+      }
+      final out = '${directory.path}/${entry.name}.jpg';
+      try {
+        final written = await EngineBridge.writeThumbnail(entry.path, out);
+        wrote = wrote || written != null;
+      } catch (_) {
+        // A file without a preview is normal; the tile keeps its placeholder.
+      }
+    }
+    if (!wrote || !mounted) return;
+    final cached = await EngineBridge.cachedRaws();
+    if (mounted) setState(() => _cached = cached);
   }
 
   void _openCached(CachedRaw entry) {
@@ -1891,33 +1930,21 @@ class _EditorPageState extends State<EditorPage> {
                 ],
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  for (final raw in _cached.take(6))
-                    GestureDetector(
-                      onLongPress: _busy ? null : () => _deleteCached(raw),
-                      child: ActionChip(
-                        avatar: Icon(
-                          raw.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
-                          size: 15,
-                          color: _kTextDim,
-                        ),
-                        label: Text(
-                          '${raw.name} · ${raw.sizeLabel}',
-                          style: const TextStyle(fontSize: 11.5),
-                        ),
-                        backgroundColor: _kSurfaceHigh,
-                        side: const BorderSide(color: _kLineStrong),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        onPressed: _busy || _booting ? null : () => _openCached(raw),
-                      ),
-                    ),
-                ],
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 7,
+                  crossAxisSpacing: 7,
+                  childAspectRatio: 1,
+                ),
+                itemCount: _cached.take(9).length,
+                itemBuilder: (context, index) {
+                  final entry = _cached[index];
+                  return _recentTile(theme, entry);
+                },
               ),
               const SizedBox(height: 6),
               TextButton.icon(
@@ -2806,6 +2833,92 @@ class _EditorPageState extends State<EditorPage> {
         ),
       ],
     ];
+  }
+
+  /// One square in the 最近导入 grid: the picture, its name in the corner and
+  /// a RAW tag. The thumbnail is the camera's own JPEG preview, so opening the
+  /// sheet does not cost a decode.
+  Widget _recentTile(ThemeData theme, CachedRaw entry) {
+    final source = entry.isPhoto ? entry.path : (entry.thumb ?? '');
+    final ready = source.isNotEmpty && File(source).existsSync();
+    return GestureDetector(
+      onTap: _busy || _booting ? null : () => _openCached(entry),
+      onLongPress: _busy ? null : () => _deleteCached(entry),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (ready)
+              Image.file(
+                File(source),
+                fit: BoxFit.cover,
+                cacheWidth: 360,
+                errorBuilder: (_, _, _) => _tilePlaceholder(entry),
+              )
+            else
+              _tilePlaceholder(entry),
+            // The name is small and dim on purpose: the pictures are the list.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(6, 10, 6, 5),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0xB3000000)],
+                  ),
+                ),
+                child: Text(
+                  entry.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 9,
+                    color: const Color(0xFFF1EAE0),
+                  ),
+                ),
+              ),
+            ),
+            if (!entry.isPhoto)
+              Positioned(
+                top: 5,
+                right: 5,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC0A0908),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'RAW',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 8,
+                      letterSpacing: 0.6,
+                      color: _kTextDim,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tilePlaceholder(CachedRaw entry) {
+    return Container(
+      color: _kSurfaceHigh,
+      alignment: Alignment.center,
+      child: Icon(
+        entry.isPhoto ? Icons.image_outlined : Icons.raw_on_outlined,
+        size: 20,
+        color: _kTextDim.withValues(alpha: 0.7),
+      ),
+    );
   }
 
   Widget _formatChip(ThemeData theme, FilmFormat? format, String label, bool enabled) {

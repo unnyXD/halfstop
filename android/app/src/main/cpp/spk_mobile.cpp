@@ -17,6 +17,8 @@
 #include "io/raw_decoder.hpp"
 #include "json.hpp"
 
+#include "libraw/libraw.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -351,6 +353,53 @@ int32_t spk_mobile_engine_capabilities(spk_engine* engine, char** out_json) {
         *out_json = copy_to_c(capabilities != nullptr ? capabilities : "{}");
     }
     return SPK_OK;
+}
+
+// Writes the camera's own JPEG preview beside an import, so the home grid can
+// show a tile without paying for a decode. LibRaw exposes it as `unpack_thumb`:
+// the bytes are already a JPEG, so this is a header read plus a file write
+// (tens of milliseconds), not a render.
+//
+// Returns 1 when a preview was written, 0 when the file has none, -1 on error.
+int32_t spk_mobile_write_thumbnail(const char* src_path, const char* out_path, char** out_json) {
+    if (out_json != nullptr) *out_json = nullptr;
+    if (src_path == nullptr || *src_path == '\0' || out_path == nullptr || *out_path == '\0') {
+        fail_reply(out_json, "arguments", "src_path and out_path are required");
+        return SPK_ERR_INVALID_ARG;
+    }
+    LibRaw raw;
+    if (raw.open_file(src_path) != LIBRAW_SUCCESS) {
+        fail_reply(out_json, "thumbnail", "LibRaw cannot open the file");
+        return -1;
+    }
+    if (raw.unpack_thumb() != LIBRAW_SUCCESS) {
+        // Many cameras ship no preview at all; that is not an error worth a
+        // dialog, the tile just draws its placeholder.
+        return 0;
+    }
+    const auto& thumb = raw.imgdata.thumbnail;
+    if (thumb.tformat != LIBRAW_THUMBNAIL_JPEG || thumb.thumb == nullptr || thumb.tlength <= 0) {
+        return 0;
+    }
+    FILE* out = std::fopen(out_path, "wb");
+    if (out == nullptr) {
+        fail_reply(out_json, "thumbnail", "cannot write the thumbnail");
+        return -1;
+    }
+    const size_t written = std::fwrite(thumb.thumb, 1, size_t(thumb.tlength), out);
+    std::fclose(out);
+    if (written != size_t(thumb.tlength)) {
+        std::remove(out_path);
+        fail_reply(out_json, "thumbnail", "short write");
+        return -1;
+    }
+    if (out_json != nullptr) {
+        spk::Json reply;
+        reply.set("ok", spk::Json(true));
+        reply.set("bytes", spk::Json(double(written)));
+        *out_json = copy_to_c(reply.dump());
+    }
+    return 1;
 }
 
 // The largest frame the device can bind, in pixels.

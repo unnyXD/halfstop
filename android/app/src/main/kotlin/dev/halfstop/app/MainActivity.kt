@@ -160,11 +160,15 @@ class MainActivity : FlutterActivity() {
                 ?: emptyList()
         }
         return files.sortedByDescending { it.lastModified() }.take(20).map {
+            val thumb = File(File(it.parentFile, THUMB_DIR), "${it.name}.jpg")
             mapOf(
                 "name" to it.name,
                 "path" to it.absolutePath,
                 "size" to it.length(),
                 "kind" to if (isRawName(it.name)) "raw" else "photo",
+                // The home grid draws this when it exists; a plain JPEG is its
+                // own thumbnail, so the field stays empty for photos.
+                "thumb" to (if (thumb.isFile) thumb.absolutePath else ""),
             )
         }
     }
@@ -187,8 +191,12 @@ class MainActivity : FlutterActivity() {
             return false
         }
         if (directories.none { canonical.parentFile == it }) return false
+        File(File(canonical.parentFile, THUMB_DIR), "${canonical.name}.jpg").delete()
         return canonical.delete()
     }
+
+    /** Where the home grid keeps each import's embedded preview. */
+    private val THUMB_DIR = ".thumbs"
 
     /** What LibRaw can actually open. A phone's camera roll is full of JPEGs. */
     private fun isRawName(name: String): Boolean =

@@ -72,11 +72,16 @@ class CachedRaw {
     required this.path,
     required this.size,
     this.kind = 'raw',
+    this.thumb,
   });
 
   final String name;
   final String path;
   final int size;
+
+  /// The camera's embedded preview, written beside the import on first sight.
+  /// Null until the grid has asked for it (or when the file carries none).
+  final String? thumb;
 
   /// `raw` (LibRaw decodes it) or `photo` (Dart decodes it, then the engine
   /// takes the pixels directly).
@@ -107,7 +112,7 @@ class EngineBridge {
   EngineBridge._();
 
   static const MethodChannel _channel = MethodChannel('halfstop/engine');
-  static const int expectedAbi = 3;
+  static const int expectedAbi = 4;
 
   static DynamicLibrary? _cached;
 
@@ -232,9 +237,49 @@ class EngineBridge {
               path: entry['path'] as String? ?? '',
               size: (entry['size'] as num?)?.toInt() ?? 0,
               kind: entry['kind'] as String? ?? 'raw',
+              thumb: entry['thumb'] as String?,
             ))
         .where((entry) => entry.path.isNotEmpty)
         .toList();
+  }
+
+  /// Writes the RAW's own JPEG preview next to it and returns its path.
+  ///
+  /// The bytes come from `unpack_thumb`, so this is a header read plus a write
+  /// — not a decode — and it stays off the UI isolate because LibRaw touches
+  /// the disk. Returns null when the file carries no JPEG preview.
+  static Future<String?> writeThumbnail(String rawPath, String outPath) async {
+    // The lookup happens *inside* the isolate: a DynamicLibrary and the
+    // closures `asFunction` returns are not sendable, so doing it here and
+    // capturing them in the closure would fail the message check and never
+    // reach the native side at all.
+    final status = await Isolate.run(() => writeThumbnailSync(rawPath, outPath));
+    return status == 1 ? outPath : null;
+  }
+
+  /// Runs on the isolate that owns the FFI handles.
+  static int writeThumbnailSync(String rawPath, String outPath) {
+    final lib = _library();
+    final fn = lib.lookupFunction<
+        Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
+        int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>)>(
+      'spk_mobile_write_thumbnail',
+    );
+    final free = lib.lookupFunction<Void Function(Pointer<Utf8>),
+        void Function(Pointer<Utf8>)>('spk_mobile_string_free');
+
+    final src = rawPath.toNativeUtf8();
+    final dst = outPath.toNativeUtf8();
+    final slot = calloc<Pointer<Utf8>>();
+    try {
+      slot.value = nullptr;
+      return fn(src, dst, slot);
+    } finally {
+      if (slot.value != nullptr) free(slot.value);
+      calloc.free(slot);
+      calloc.free(src);
+      calloc.free(dst);
+    }
   }
 
   /// Decodes a RAW, renders one tier and returns sRGB RGBA8888 pixels.

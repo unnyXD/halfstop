@@ -43,6 +43,8 @@ Android 上的物理胶片模拟相机后期应用。Flutter 前端 + Spektrafil
 
 两条路的汇合点是 `spk_open`：引擎本来就接受线性 RGB 缓冲，相册图片走 `spk_mobile_open_image_on` 跳过 LibRaw，之后的渲染链路完全一致。
 
+首页的「最近导入」是缩略图网格：RAW 用相机内嵌的 JPEG 预览（LibRaw 的 `unpack_thumb`，只读文件头不解码），相册图片直接读原文件，都不需要渲染一次。没有内嵌预览的文件退回占位图标。
+
 ## 实时性怎么来的
 
 引擎把参数分成两类，UI 按两类处理：
