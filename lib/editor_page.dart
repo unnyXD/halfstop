@@ -1366,18 +1366,37 @@ class _EditorPageState extends State<EditorPage> {
   Widget _buildHeader(ThemeData theme) {
     final hasImage = _image != null;
     if (!hasImage) {
+      // A two-line lockup: the name, then the latin one tracked out under it.
+      // One line of 20sp letter-spaced type read as a placeholder, not a brand.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(26, 20, 26, 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               '半档',
               style: theme.textTheme.titleLarge?.copyWith(
-                fontSize: 20,
-                letterSpacing: 4,
+                fontSize: 24,
+                height: 1.1,
+                letterSpacing: 7,
+                fontWeight: FontWeight.w500,
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(width: 16, height: 1, color: _kLineStrong),
+                const SizedBox(width: 8),
+                Text(
+                  'HALFSTOP',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 8.5,
+                    letterSpacing: 3.4,
+                    color: _kTextDim,
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       );
@@ -1857,27 +1876,48 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Widget _buildEmptyState(ThemeData theme) {
-    return Center(
+    // Top-aligned, not centred: the brand block belongs under the wordmark, and
+    // a centred column on a tall phone opened a hole between the two.
+    return Align(
+      alignment: Alignment.topCenter,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+        padding: const EdgeInsets.fromLTRB(28, 10, 28, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(
-              width: 86,
-              height: 58,
-              child: CustomPaint(painter: _FrameMarkPainter()),
+            // The same card the launcher icon is cut from, sitting on the
+            // table like a print: a hair off square, with a soft shadow.
+            Transform.rotate(
+              angle: -0.012,
+              child: Container(
+                width: 168,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      blurRadius: 26,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.asset(
+                    'assets/brand/halfstop-card.png',
+                    width: 168,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 20),
-            // The wordmark is in the header now; repeating it here was noise.
-            Container(width: 26, height: 1, color: _kLineStrong),
-            const SizedBox(height: 14),
             Text(
               '物理胶片模拟 · 光谱计算全在本机',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 26),
             Row(
               children: [
                 Expanded(
