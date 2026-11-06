@@ -83,6 +83,23 @@ Android 上的物理胶片模拟相机后期应用。Flutter 前端 + Spektrafil
 - **引擎不写文件**——只返回 RGBA16 像素，Dart 侧自己编码
 - **两层渲染**——Layer 1（胶片/相纸/放大机）在引擎里，Layer 2（调色）留给 Flutter，滑块才能跟手
 
+## 图标
+
+图标是一张钢笔线条的相机插画：`design/icon/artwork.png`（裁到机身，去掉外圈文字与水印），
+`python tool/gen-icon.py` 把它排到纸色底版上，一次缩放出所有密度。
+
+| 输出 | 用途 |
+|---|---|
+| `design/icon/halfstop-1024.png` | 母版与商店用图 |
+| `mipmap-*/ic_launcher.png` | 旧启动器（全出血方块） |
+| `mipmap-*/ic_launcher_round.png` | 旧圆形启动器 |
+| `mipmap-*/ic_launcher_foreground.png` | 自适应前景（透明，相机收在安全圆内） |
+| `mipmap-*/ic_launcher_monochrome.png` | Android 13+ 主题图标（按墨色覆盖率反出白色线条） |
+
+底版是插画自己的纸色 `#F2EADC`，写在 `values/colors.xml` 的 `ic_launcher_background` 里；
+前景四周做了 5% 羽化，贴在纸色底上不会露出矩形接缝。所有尺寸都从插画一次性缩下来，
+不要在小尺寸上重画细节——48 px 下齿孔和刻字只剩几颗点。
+
 ## 构建
 
 需要 Flutter stable、JDK 17、Android SDK（platform 36）、**NDK 28.2.13676358**（必须带 `glslc`）、CMake 3.22.1。
