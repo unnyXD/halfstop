@@ -1,11 +1,12 @@
-"""Generate the Halfstop launcher icon from code.
+"""Generate the Halfstop launcher icon.
 
-The mark is a vertical 35mm strip with a half-filled aperture in the gate: the
-strip says "film", the half disc says "half a stop" — the name of the app.
+The mark is the pen-and-ink camera in `design/icon/artwork.png`, cropped to the
+body: the paper and the wobbly line art are the artwork's own, and this script
+only places it on the plate and writes every density a launcher asks for.
 
-Everything is drawn once in a 1024-unit design space at 2x, then scaled down
-with LANCZOS. Scaling a finished layer (rather than re-drawing at each size) is
-what keeps the thin strokes and the perforations identical across densities.
+Composing a finished bitmap down (rather than re-rendering per size) is what
+keeps the hatching identical across densities; the artwork is 1184 px wide, so
+even the 432 px adaptive foreground is a downscale.
 
     python tool/gen-icon.py
 
@@ -17,95 +18,83 @@ Outputs (overwrites):
     android/.../mipmap-*/ic_launcher_monochrome.png              themed (13+)
 """
 
+import random
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "android/app/src/main/res"
 OUT = ROOT / "design/icon"
 
-DESIGN = 1024  # design space, all geometry below is in these units
-DRAW_SCALE = 2  # render the master layer at 2x, then downsample
+# The artwork's own paper, sampled and rounded; `values/colors.xml` carries the
+# same value as `ic_launcher_background`, so the plate and the picture agree.
+PAPER = (242, 234, 220, 255)
 
-# Darkroom palette, same values as lib/editor_page.dart.
-BG = (10, 9, 8, 255)  # #0A0908 warm black
-AMBER = (227, 163, 92, 255)  # #E3A35C safelight
+# How much of the canvas the mark takes. Legacy plates can be generous; an
+# adaptive foreground must stay inside the 66dp safe circle of its 108dp
+# canvas, and this camera is ~1.4:1, so it shrinks by width.
+LEGACY_SCALE = 0.92
+ADAPTIVE_SCALE = 0.64
 
-# Strip geometry: a landscape 35mm segment. Landscape, not portrait — a
-# portrait strip with dots down the sides reads as a phone at launcher size.
-STRIP = (12, 142, 1012, 882)  # x0, y0, x1, y1
-STRIP_RADIUS = 40
-STROKE = 28
-
-GATE = (92, 232, 932, 792)  # 840 x 560, i.e. 3:2 — a real 135 frame
-HOLE_W, HOLE_H, HOLE_R = 48, 30, 9
-HOLES = 6
-
-# Half disc inside the gate: left half solid, right half outlined.
-DISC_CX, DISC_CY, DISC_R = 512, 512, 132
-DISC_STROKE = 22
+FEATHER = 0.05  # share of each edge that fades into the plate
 
 
-def _px(box, k):
-    return tuple(round(v * k) for v in box)
+def _artwork() -> Image.Image:
+    return Image.open(OUT / "artwork.png").convert("RGB")
 
 
-def build_master() -> Image.Image:
-    """The mark on a transparent 1024 canvas, drawn at DRAW_SCALE."""
-    px = DESIGN * DRAW_SCALE
-    img = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+_ART = _artwork()
+
+
+def _mark(width: int) -> Image.Image:
+    """The camera on a feathered transparent field, exactly `width` wide.
+
+    The artwork brings its own paper, so pasting it on a plate of the same
+    colour looks seamless — except at the border, where the scan's vignette
+    would draw a rectangle. Fading the outermost few percent hides that.
+    """
+    art = _ART
+    height = max(1, round(width * art.size[1] / art.size[0]))
+    layer = art.resize((width, height), Image.LANCZOS).convert("RGBA")
+
+    mask = Image.new("L", (width, height), 255)
+    d = ImageDraw.Draw(mask)
+    fx = max(3, round(width * FEATHER))
+    fy = max(3, round(height * FEATHER))
+    for i in range(fx):
+        v = round(255 * (i + 1) / fx)
+        d.line([(i, 0), (i, height)], fill=v)
+        d.line([(width - 1 - i, 0), (width - 1 - i, height)], fill=v)
+    for j in range(fy):
+        v = round(255 * (j + 1) / fy)
+        d.line([(0, j), (width, j)], fill=v)
+        d.line([(0, height - 1 - j), (width, height - 1 - j)], fill=v)
+    mask = mask.filter(ImageFilter.GaussianBlur(max(1, fx // 3)))
+    layer.putalpha(mask)
+    return layer
+
+
+def _mono(mark: Image.Image, colour=(255, 255, 255, 255)) -> Image.Image:
+    """The line art as a single-colour silhouette: ink keeps its coverage."""
+    grey = mark.convert("L")
+    alpha = grey.point(lambda v: 255 - v)  # dark ink -> opaque
+    out = Image.new("RGBA", mark.size, colour)
+    out.putalpha(alpha)
+    return out
+
+
+def _paper(size: int) -> Image.Image:
+    """Flat paper with a whisper of grain — enough to look printed, not noisy."""
+    img = Image.new("RGB", (size, size), PAPER[:3])
     d = ImageDraw.Draw(img)
-    k = DRAW_SCALE
-
-    # --- strip: outline only, so it sits on any backdrop ---
-    d.rounded_rectangle(
-        _px(STRIP, k),
-        radius=round(STRIP_RADIUS * k),
-        outline=AMBER,
-        width=round(STROKE * k),
-    )
-
-    # --- perforations along the top and bottom rebates (35mm has them on the
-    # long edges, not the ends) ---
-    x0, y0, x1, y1 = GATE
-    top_cy = (STRIP[1] + y0) / 2
-    bottom_cy = (y1 + STRIP[3]) / 2
-    step = (x1 - x0) / HOLES
-    for i in range(HOLES):
-        cx = x0 + step * (i + 0.5)
-        for cy in (top_cy, bottom_cy):
-            d.rounded_rectangle(
-                _px(
-                    (
-                        cx - HOLE_W / 2,
-                        cy - HOLE_H / 2,
-                        cx + HOLE_W / 2,
-                        cy + HOLE_H / 2,
-                    ),
-                    k,
-                ),
-                radius=round(HOLE_R * k),
-                fill=AMBER,
-            )
-
-    # --- gate outline, thin: the rebate is thick, the gate is precise ---
-    d.rounded_rectangle(
-        _px(GATE, k),
-        radius=round(18 * k),
-        outline=AMBER,
-        width=round(10 * k),
-    )
-
-    # --- half disc: solid left, ringed right ---
-    box = (DISC_CX - DISC_R, DISC_CY - DISC_R, DISC_CX + DISC_R, DISC_CY + DISC_R)
-    d.ellipse(_px(box, k), outline=AMBER, width=round(DISC_STROKE * k))
-    d.pieslice(_px(box, k), start=90, end=270, fill=AMBER)
-
-    return img
-
-
-_MASTER = build_master()
+    rng = random.Random(7)
+    step = max(2, size // 160)
+    for y in range(0, size, step):
+        for x in range(0, size, step):
+            v = rng.randint(-3, 3)
+            d.point((x, y), fill=(PAPER[0] + v, PAPER[1] + v, PAPER[2] + v))
+    return img.convert("RGBA")
 
 
 def render(
@@ -113,39 +102,30 @@ def render(
     *,
     with_background: bool,
     scale: float,
-    background=BG,
     tint=None,
 ) -> Image.Image:
-    """One square icon.
-
-    `scale` is the mark's size as a fraction of the canvas. Legacy icons can be
-    generous (0.74); adaptive foregrounds must stay inside the 66dp safe circle
-    of their 108dp canvas, which works out to about 0.48 for this 1.35:1 mark
-    once its corners are accounted for.
-    """
+    """One square icon with the camera centred at `scale` of the canvas."""
     ss = 4
     canvas = size * ss
-    base = Image.new(
-        "RGBA", (canvas, canvas), background if with_background else (0, 0, 0, 0)
+    base = (
+        _paper(canvas)
+        if with_background
+        else Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
     )
 
-    master = _MASTER
-    if tint is not None:
-        # Themed icons are a single-colour silhouette: keep alpha, swap colour.
-        master = Image.new("RGBA", _MASTER.size, tint)
-        master.putalpha(_MASTER.getchannel("A"))
-
     inner = max(1, round(canvas * scale))
-    layer = master.resize((inner, inner), Image.LANCZOS)
-    offset = (canvas - inner) // 2
-    base.alpha_composite(layer, (offset, offset))
+    layer = _mark(inner)
+    if tint is not None:
+        layer = _mono(layer, tint)
+    offset = ((canvas - layer.size[0]) // 2, (canvas - layer.size[1]) // 2)
+    base.alpha_composite(layer, offset)
     return base.resize((size, size), Image.LANCZOS)
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
-    master = render(1024, with_background=True, scale=0.74)
+    master = render(1024, with_background=True, scale=LEGACY_SCALE)
     master.save(OUT / "halfstop-1024.png")
     master.resize((512, 512), Image.LANCZOS).save(OUT / "halfstop-512.png")
 
@@ -155,17 +135,18 @@ def main() -> None:
     for density, px in legacy.items():
         folder = RES / f"mipmap-{density}"
         folder.mkdir(parents=True, exist_ok=True)
-        icon = render(px, with_background=True, scale=0.74)
+        icon = render(px, with_background=True, scale=LEGACY_SCALE)
         icon.save(folder / "ic_launcher.png")
         icon.save(folder / "ic_launcher_round.png")
         print(f"mipmap-{density}: ic_launcher + round {px}px")
 
-    # Adaptive foreground: transparent, mark inside the safe circle.
+    # Adaptive foreground: transparent, camera inside the safe circle. The plate
+    # colour lives in res/values/colors.xml (ic_launcher_background).
     for density, px in adaptive.items():
         folder = RES / f"mipmap-{density}"
-        fg = render(px, with_background=False, scale=0.48)
+        fg = render(px, with_background=False, scale=ADAPTIVE_SCALE)
         fg.save(folder / "ic_launcher_foreground.png")
-        mono = render(px, with_background=False, scale=0.48, tint=(255, 255, 255, 255))
+        mono = render(px, with_background=False, scale=ADAPTIVE_SCALE, tint=(255, 255, 255, 255))
         mono.save(folder / "ic_launcher_monochrome.png")
         print(f"mipmap-{density}: foreground + monochrome {px}px")
 
@@ -173,11 +154,11 @@ def main() -> None:
     sheet = Image.new("RGBA", (700, 240), (26, 24, 21, 255))
     x = 24
     for px in (192, 96, 48):
-        sheet.alpha_composite(render(px, with_background=True, scale=0.74), (x, 24))
+        sheet.alpha_composite(render(px, with_background=True, scale=LEGACY_SCALE), (x, 24))
         x += px + 24
     x += 16
     for px in (96, 72, 48):
-        icon = render(px, with_background=True, scale=0.74)
+        icon = render(px, with_background=True, scale=LEGACY_SCALE)
         mask = Image.new("L", (px, px), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, px - 1, px - 1), fill=255)
         sheet.paste(icon, (x, 24), mask)
