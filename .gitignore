@@ -73,3 +73,4 @@ third_party/spektrafilm/engine/resources/vulkan/
 # Sample RAWs and generated art are local working material
 /testdata/
 /android/build/
+/AGENTS.md
