@@ -107,6 +107,17 @@ class _EditorPageState extends State<EditorPage> {
   double _halation = 1;
   double _glare = 0;
 
+  /// How far the halo spreads past a highlight. 1 is the film's own scatter;
+  /// above it the light diffuses further, below it tightens.
+  double _scatter = 1;
+
+  /// A film with no anti-halation backing: every highlight throws a halo.
+  bool _noAntihalation = false;
+
+  /// A Wratten filter on the lens ("w8", "w25", …); empty is none. It only
+  /// changes black-and-white stocks — colour emulsions carry their own dyes.
+  String _cameraFilter = '';
+
   /// Undo stack of edit states. Snapshots are pushed at the start of a gesture,
   /// not per frame, so one slider drag is one undo step.
   static const int _maxUndo = 20;
@@ -274,6 +285,9 @@ class _EditorPageState extends State<EditorPage> {
         'grain_amount': _grain,
         'halation_amount': _halation,
         'glare_amount': _glare,
+        'halation_scatter_amount': _scatter,
+        'antihalation_removed': _noAntihalation,
+        'camera_filter': _cameraFilter,
       };
 
   /// The toolbar's "+" asks which of the two entries to use.
@@ -3365,7 +3379,96 @@ class _EditorPageState extends State<EditorPage> {
         onChanged: (value) => setState(() => _glare = value),
         onChangeEnd: (_) => _applySlow(),
       ),
+      _sliderRow(
+        theme,
+        label: '散射',
+        valueLabel: _scatter.toStringAsFixed(2),
+        value: _scatter,
+        min: 0,
+        max: 1,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _scatter = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _switchRow(
+        theme,
+        '去反卤层',
+        subtitle: '没有背层的胶片，高光会整片晕开',
+        value: _noAntihalation,
+        enabled: canRender,
+        onChanged: (value) {
+          _pushUndo();
+          setState(() => _noAntihalation = value);
+          _applySlow();
+        },
+      ),
+      _filterRow(theme, canRender),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(70, 2, 16, 0),
+        child: Text(
+          '彩色片上等于一块染色玻璃，黑白片才按对比度算',
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 9.5,
+            color: _kTextDim.withValues(alpha: 0.7),
+          ),
+        ),
+      ),
     ];
+  }
+
+  /// The lens filter, as Wratten numbers. Scrolled rather than wrapped: nine
+  /// chips on two lines pushed the label into the gap between them.
+  Widget _filterRow(ThemeData theme, bool enabled) {
+    const values = ['', 'w8', 'w11', 'w12', 'w15', 'w21', 'w25', 'w47', 'w58'];
+    const labels = ['无', 'W8', 'W11', 'W12', 'W15', 'W21', 'W25', 'W47', 'W58'];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 0, 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 54,
+            child: Text(
+              '镜头滤镜',
+              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(right: 16),
+              child: Row(
+                children: [
+                  for (var i = 0; i < values.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(labels[i], style: const TextStyle(fontSize: 11)),
+                        selected: _cameraFilter == values[i],
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        selectedColor: _kAccent.withValues(alpha: 0.2),
+                        labelStyle: TextStyle(
+                          color: _cameraFilter == values[i]
+                              ? _kAccent
+                              : theme.colorScheme.onSurface,
+                        ),
+                        onSelected: enabled
+                            ? (_) {
+                                _pushUndo();
+                                setState(() => _cameraFilter = values[i]);
+                                _applySlow();
+                              }
+                            : null,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Apply the meter's suggestion to the exposure slider. One tap, one undo
@@ -3387,6 +3490,9 @@ class _EditorPageState extends State<EditorPage> {
       _grain = 1;
       _halation = 1;
       _glare = 0;
+      _scatter = 1;
+      _noAntihalation = false;
+      _cameraFilter = '';
     });
     _applySlow();
   }
