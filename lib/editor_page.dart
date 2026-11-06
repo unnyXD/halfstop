@@ -164,6 +164,7 @@ class _EditorPageState extends State<EditorPage> {
   /// The pinch progress so far, so updates apply the delta since last frame.
   double _cropGestureScale = 1;
   bool _overscanOn = false;
+
   /// `strip` lays out the whole film width, `filed` a sliver of rebate.
   String _overscanMode = 'strip';
   String _holes = 'white';
@@ -249,7 +250,6 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-
   String _stockName(String id) {
     for (final stock in _stocks) {
       if (stock.id == id) return stock.name;
@@ -269,26 +269,26 @@ class _EditorPageState extends State<EditorPage> {
       _sessionOpen && _worker != null && _resourcesDir != null;
 
   Map<String, Object?> _liveDelta() => {
-        // The engine's `print_exposure` is an enlarger *exposure multiplier*:
-        // it scales the light the print gets, so a larger value means a denser
-        // (darker) print. The slider is a brightness control, hence 2^-EV:
-        // `print_exposure = 2^-stops` is the engine's own convention (see
-        // di_live_offsets in digital_intermediate.cpp).
-        'print_exposure': math.pow(2, -_exposureEv).toDouble(),
-        'm_filter_shift': _magenta,
-        'y_filter_shift': _yellow,
-        'filter_shift_scale': _shiftScale,
-        'preflash_exposure': _preflash,
-      };
+    // The engine's `print_exposure` is an enlarger *exposure multiplier*:
+    // it scales the light the print gets, so a larger value means a denser
+    // (darker) print. The slider is a brightness control, hence 2^-EV:
+    // `print_exposure = 2^-stops` is the engine's own convention (see
+    // di_live_offsets in digital_intermediate.cpp).
+    'print_exposure': math.pow(2, -_exposureEv).toDouble(),
+    'm_filter_shift': _magenta,
+    'y_filter_shift': _yellow,
+    'filter_shift_scale': _shiftScale,
+    'preflash_exposure': _preflash,
+  };
 
   Map<String, Object?> _slowDelta() => {
-        'grain_amount': _grain,
-        'halation_amount': _halation,
-        'glare_amount': _glare,
-        'halation_scatter_amount': _scatter,
-        'antihalation_removed': _noAntihalation,
-        'camera_filter': _cameraFilter,
-      };
+    'grain_amount': _grain,
+    'halation_amount': _halation,
+    'glare_amount': _glare,
+    'halation_scatter_amount': _scatter,
+    'antihalation_removed': _noAntihalation,
+    'camera_filter': _cameraFilter,
+  };
 
   /// The toolbar's "+" asks which of the two entries to use.
   Future<void> _import() async {
@@ -302,7 +302,10 @@ class _EditorPageState extends State<EditorPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: _kAccent),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: _kAccent,
+              ),
               title: const Text('从相册选择'),
               subtitle: const Text('JPEG / PNG / WebP，本机解码后进引擎'),
               onTap: () => Navigator.of(context).pop('photo'),
@@ -310,7 +313,9 @@ class _EditorPageState extends State<EditorPage> {
             ListTile(
               leading: const Icon(Icons.raw_on_outlined, color: _kAccent),
               title: const Text('RAW 文件'),
-              subtitle: const Text('ARW / DNG / CR2 / CR3 / NEF / RAF…，LibRaw 解码'),
+              subtitle: const Text(
+                'ARW / DNG / CR2 / CR3 / NEF / RAF…，LibRaw 解码',
+              ),
               onTap: () => Navigator.of(context).pop('raw'),
             ),
             const SizedBox(height: 8),
@@ -344,10 +349,12 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   int get _sourceWidth =>
-      ((_openInfo['input'] as Map?)?['source_width'] as num?)?.toInt() ?? _imageWidth;
+      ((_openInfo['input'] as Map?)?['source_width'] as num?)?.toInt() ??
+      _imageWidth;
 
   int get _sourceHeight =>
-      ((_openInfo['input'] as Map?)?['source_height'] as num?)?.toInt() ?? _imageHeight;
+      ((_openInfo['input'] as Map?)?['source_height'] as num?)?.toInt() ??
+      _imageHeight;
 
   /// The crop that makes this frame the selected gate's shape. Null format
   /// means "leave the frame alone".
@@ -389,6 +396,14 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  /// The profile behind `_film`, or null before the list has loaded.
+  Stock? get _currentFilm {
+    for (final stock in _stocks) {
+      if (stock.id == _film) return stock;
+    }
+    return null;
+  }
+
   /// The LUT's own film, when the current film is the one it was baked with.
   /// A table from another film still runs, but it is an approximation the
   /// engine warns about, so the fast path stays off.
@@ -423,15 +438,17 @@ class _EditorPageState extends State<EditorPage> {
       'overscan_f_number': _fNumber,
       'overscan_pair': _pair && _format?.id == '135_half',
       'date_imprint_active': _dateOn,
-      if (_dateOn) 'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
+      if (_dateOn)
+        'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
       if (_dateOn) 'date_imprint_style': _dateStyle,
       if (_dateOn) 'date_imprint_corner': _dateCorner,
       if (_dateOn) 'date_imprint_size': _dateSize,
       if (_dateOn) 'date_imprint_data_text': _dataText,
       // The rebate only exists when the rebate is drawn.
       if (_dateOn)
-        'date_imprint_placement':
-            (_format != null && _overscanOn) ? _datePlacement : 'frame',
+        'date_imprint_placement': (_format != null && _overscanOn)
+            ? _datePlacement
+            : 'frame',
     };
   }
 
@@ -513,11 +530,13 @@ class _EditorPageState extends State<EditorPage> {
     staleCrop?.dispose();
     image?.dispose();
     source?.dispose();
-    unawaited(EngineBridge.cachedRaws().then((cached) {
-      if (!mounted) return;
-      setState(() => _cached = cached);
-      unawaited(_ensureThumbnails());
-    }));
+    unawaited(
+      EngineBridge.cachedRaws().then((cached) {
+        if (!mounted) return;
+        setState(() => _cached = cached);
+        unawaited(_ensureThumbnails());
+      }),
+    );
   }
 
   Future<void> _pickFormat(FilmFormat? format) async {
@@ -531,7 +550,9 @@ class _EditorPageState extends State<EditorPage> {
         _datePlacement = 'frame';
       }
     });
-    await _applyFrame(label: format == null ? '恢复原比例…' : '按 ${format.label} 重算…');
+    await _applyFrame(
+      label: format == null ? '恢复原比例…' : '按 ${format.label} 重算…',
+    );
   }
 
   /// Enter crop mode.
@@ -623,7 +644,10 @@ class _EditorPageState extends State<EditorPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(controller.text.trim()),
             child: const Text('确定'),
@@ -660,8 +684,14 @@ class _EditorPageState extends State<EditorPage> {
           decoration: InputDecoration(hintText: helper, helperText: helper),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(''), child: const Text('清空')),
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(''),
+            child: const Text('清空'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(controller.text.trim()),
             child: const Text('确定'),
@@ -717,11 +747,18 @@ class _EditorPageState extends State<EditorPage> {
       builder: (context) => AlertDialog(
         backgroundColor: _kSurface,
         title: const Text('删除导入缓存'),
-        content: Text('${entry.name}\n${entry.sizeLabel}\n\n只删应用内的缓存副本，DCIM 或相册里的原文件不受影响。'),
+        content: Text(
+          '${entry.name}\n${entry.sizeLabel}\n\n只删应用内的缓存副本，DCIM 或相册里的原文件不受影响。',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC25B5B)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC25B5B),
+            ),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('删除'),
           ),
@@ -752,8 +789,10 @@ class _EditorPageState extends State<EditorPage> {
   /// populated the first time the app opens rather than after a render.
   Future<void> _ensureThumbnails() async {
     final missing = _cached
-        .where((entry) =>
-            !entry.isPhoto && (entry.thumb == null || entry.thumb!.isEmpty))
+        .where(
+          (entry) =>
+              !entry.isPhoto && (entry.thumb == null || entry.thumb!.isEmpty),
+        )
         .toList();
     if (missing.isEmpty) return;
     var wrote = false;
@@ -915,19 +954,19 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   _EditSnapshot _snapshot() => _EditSnapshot(
-        film: _film,
-        paper: _paper,
-        exposureEv: _exposureEv,
-        magenta: _magenta,
-        yellow: _yellow,
-        shiftScale: _shiftScale,
-        preflash: _preflash,
-        grain: _grain,
-        halation: _halation,
-        glare: _glare,
-        strength: _strength,
-        layer2: _layer2,
-      );
+    film: _film,
+    paper: _paper,
+    exposureEv: _exposureEv,
+    magenta: _magenta,
+    yellow: _yellow,
+    shiftScale: _shiftScale,
+    preflash: _preflash,
+    grain: _grain,
+    halation: _halation,
+    glare: _glare,
+    strength: _strength,
+    layer2: _layer2,
+  );
 
   void _restore(_EditSnapshot snapshot) {
     _film = snapshot.film;
@@ -1022,7 +1061,11 @@ class _EditorPageState extends State<EditorPage> {
         final frame = await _worker!.reprint(tier: 'live');
         stopwatch.stop();
         if (!mounted) return;
-        await _showFrame(frame, fast: true, wallMs: stopwatch.elapsedMilliseconds);
+        await _showFrame(
+          frame,
+          fast: true,
+          wallMs: stopwatch.elapsedMilliseconds,
+        );
       }
     } catch (error) {
       _setError(error);
@@ -1051,7 +1094,11 @@ class _EditorPageState extends State<EditorPage> {
       final stopwatch = Stopwatch()..start();
       final frame = await _worker!.reprint(tier: tier);
       stopwatch.stop();
-      await _showFrame(frame, fast: false, wallMs: stopwatch.elapsedMilliseconds);
+      await _showFrame(
+        frame,
+        fast: false,
+        wallMs: stopwatch.elapsedMilliseconds,
+      );
     } catch (error) {
       _setError(error);
     } finally {
@@ -1067,7 +1114,11 @@ class _EditorPageState extends State<EditorPage> {
       final stopwatch = Stopwatch()..start();
       final frame = await _worker!.reprint(tier: 'live');
       stopwatch.stop();
-      await _showFrame(frame, fast: true, wallMs: stopwatch.elapsedMilliseconds);
+      await _showFrame(
+        frame,
+        fast: true,
+        wallMs: stopwatch.elapsedMilliseconds,
+      );
     } catch (error) {
       _setError(error);
     } finally {
@@ -1096,7 +1147,8 @@ class _EditorPageState extends State<EditorPage> {
       // pushed, since a stock change invalidates the cached print and the
       // table would then be run against a cold one. The params follow right
       // after, so the next render uses the new paper.
-      final lutFast = key == 'print_stock' &&
+      final lutFast =
+          key == 'print_stock' &&
           _quality == PreviewQuality.fast &&
           _lutMatchesFilm(_paper);
       RenderFrame? fastFrame;
@@ -1114,7 +1166,10 @@ class _EditorPageState extends State<EditorPage> {
         'film_stock': _film,
         'print_stock': _paper,
         // The rebate carries the stock's name, so it has to change with it.
-        if (_overscanOn) 'overscan_edge_text': _edgeText.isEmpty ? _defaultEdgeText : _edgeText,
+        if (_overscanOn)
+          'overscan_edge_text': _edgeText.isEmpty
+              ? _defaultEdgeText
+              : _edgeText,
       });
       if (fastFrame != null) {
         await _showFrame(fastFrame, fast: true, wallMs: null);
@@ -1123,7 +1178,11 @@ class _EditorPageState extends State<EditorPage> {
       final stopwatch = Stopwatch()..start();
       final frame = await _worker!.reprint(tier: 'live');
       stopwatch.stop();
-      await _showFrame(frame, fast: true, wallMs: stopwatch.elapsedMilliseconds);
+      await _showFrame(
+        frame,
+        fast: true,
+        wallMs: stopwatch.elapsedMilliseconds,
+      );
     } catch (error) {
       _setError(error);
     } finally {
@@ -1142,10 +1201,8 @@ class _EditorPageState extends State<EditorPage> {
       context: context,
       backgroundColor: _kSurface,
       showDragHandle: true,
-      builder: (_) => _ExportSheet(
-        film: _stockName(_film),
-        paper: _stockName(_paper),
-      ),
+      builder: (_) =>
+          _ExportSheet(film: _stockName(_film), paper: _stockName(_paper)),
     );
     if (options == null || !mounted) return;
 
@@ -1155,11 +1212,13 @@ class _EditorPageState extends State<EditorPage> {
       _busy = true;
       _exporting = true;
     });
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _ExportProgressDialog(stage: stage),
-    ).then((_) => dialogOpen = false));
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _ExportProgressDialog(stage: stage),
+      ).then((_) => dialogOpen = false),
+    );
 
     try {
       // A rebate is drawn on a canvas larger than the frame, and the `full`
@@ -1183,7 +1242,9 @@ class _EditorPageState extends State<EditorPage> {
           : await _worker!.render(tier: 'full');
       final megapixels = frame.width * frame.height / 1000000;
       // Blending needs the source frame as well, so the ceiling halves.
-      final ceiling = _strength < 0.999 ? _maxFullExportMp / 2 : _maxFullExportMp;
+      final ceiling = _strength < 0.999
+          ? _maxFullExportMp / 2
+          : _maxFullExportMp;
       if (options.longEdge == null && megapixels > ceiling) {
         throw ExportFailure(
           '这张 ${megapixels.toStringAsFixed(0)} MP，全尺寸导出内存吃紧'
@@ -1197,7 +1258,8 @@ class _EditorPageState extends State<EditorPage> {
         sourceFrame = await _worker!.exportSource(tier: 'full');
       }
       stage.value = '编码 JPEG…';
-      final input = (_openInfo['input'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final input =
+          (_openInfo['input'] as Map?)?.cast<String, dynamic>() ?? const {};
       final photo = await encodeAndSave(
         pixels: frame.pixels,
         width: frame.width,
@@ -1242,7 +1304,9 @@ class _EditorPageState extends State<EditorPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${photo.width} × ${photo.height} · JPEG · ${photo.sizeLabel}'),
+            Text(
+              '${photo.width} × ${photo.height} · JPEG · ${photo.sizeLabel}',
+            ),
             const SizedBox(height: 4),
             Text(
               photo.exifTags > 0
@@ -1363,7 +1427,11 @@ class _EditorPageState extends State<EditorPage> {
             child: SingleChildScrollView(
               child: SelectableText(
                 report,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.45),
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  height: 1.45,
+                ),
               ),
             ),
           ),
@@ -1622,7 +1690,9 @@ class _EditorPageState extends State<EditorPage> {
                       _booting
                           ? '加载引擎与资源…'
                           : (_busyLabel ??
-                              (_quality == PreviewQuality.fine ? '精细渲染中…' : '渲染中…')),
+                                (_quality == PreviewQuality.fine
+                                    ? '精细渲染中…'
+                                    : '渲染中…')),
                       style: theme.textTheme.labelMedium,
                     ),
                   ],
@@ -1683,8 +1753,10 @@ class _EditorPageState extends State<EditorPage> {
                 );
                 // The window keeps the gate's shape and sits at 92% of the
                 // viewport, so the picture stays visible on every side.
-                final available =
-                    Size(box.maxWidth * 0.92, box.maxHeight * 0.92);
+                final available = Size(
+                  box.maxWidth * 0.92,
+                  box.maxHeight * 0.92,
+                );
                 final windowSize = Size(
                   source.width * crop.width,
                   source.height * crop.height,
@@ -1703,12 +1775,8 @@ class _EditorPageState extends State<EditorPage> {
                 return GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onScaleStart: (_) => _cropGestureScale = 1,
-                  onScaleUpdate: (details) => _cropGestureUpdate(
-                    details,
-                    source,
-                    scale,
-                    origin,
-                  ),
+                  onScaleUpdate: (details) =>
+                      _cropGestureUpdate(details, source, scale, origin),
                   child: CustomPaint(
                     painter: _CropPainter(
                       image: canvas,
@@ -1742,8 +1810,7 @@ class _EditorPageState extends State<EditorPage> {
   double get _cropZoom {
     final format = _format;
     if (format == null) return 1;
-    final base =
-        centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
+    final base = centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
     return base.width <= 0 ? 1 : base.width / _cropBox.width;
   }
 
@@ -1784,7 +1851,10 @@ class _EditorPageState extends State<EditorPage> {
   /// Fit [source] inside [box], centred.
   Rect _containRect(Size box, Size source) {
     if (source.width <= 0 || source.height <= 0) return Offset.zero & box;
-    final scale = math.min(box.width / source.width, box.height / source.height);
+    final scale = math.min(
+      box.width / source.width,
+      box.height / source.height,
+    );
     final width = source.width * scale;
     final height = source.height * scale;
     return Rect.fromLTWH(
@@ -1894,7 +1964,11 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(width: 10),
           ],
-          Icon(Icons.touch_app_outlined, size: 12, color: _kTextDim.withValues(alpha: 0.8)),
+          Icon(
+            Icons.touch_app_outlined,
+            size: 12,
+            color: _kTextDim.withValues(alpha: 0.8),
+          ),
           const SizedBox(width: 4),
           Text(
             '长按对比',
@@ -2011,7 +2085,9 @@ class _EditorPageState extends State<EditorPage> {
                   const SizedBox(width: 10),
                   Text(
                     '最近导入',
-                    style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.6),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      letterSpacing: 1.6,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Container(width: 14, height: 1, color: _kLineStrong),
@@ -2041,7 +2117,9 @@ class _EditorPageState extends State<EditorPage> {
                 label: const Text('引擎诊断'),
                 style: TextButton.styleFrom(
                   foregroundColor: _kTextDim,
-                  textStyle: theme.textTheme.labelSmall?.copyWith(fontSize: 10.5),
+                  textStyle: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 10.5,
+                  ),
                   visualDensity: VisualDensity.compact,
                 ),
               ),
@@ -2169,10 +2247,7 @@ class _EditorPageState extends State<EditorPage> {
           child: _panelExpanded
               ? Column(
                   key: const ValueKey('open'),
-                  children: [
-                    _buildFilmRow(theme),
-                    _buildTabs(theme),
-                  ],
+                  children: [_buildFilmRow(theme), _buildTabs(theme)],
                 )
               : _buildCollapsedBar(theme),
         ),
@@ -2214,16 +2289,23 @@ class _EditorPageState extends State<EditorPage> {
           ),
           child: Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F0E0C),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _kLineStrong),
-                ),
-                child: const CustomPaint(painter: _FrameMarkPainter()),
+              // The box of the film that is loaded, not a generic mark: it is
+              // the same picture the picker shows, so the strip says which
+              // stock is in the camera at a glance.
+              SizedBox(
+                width: 38,
+                height: 46,
+                child: _currentFilm == null
+                    ? Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F0E0C),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _kLineStrong),
+                        ),
+                        child: const CustomPaint(painter: _FrameMarkPainter()),
+                      )
+                    : _stockGlyph(theme, _currentFilm!, width: 38, height: 46),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -2261,7 +2343,11 @@ class _EditorPageState extends State<EditorPage> {
                   color: _kTextDim,
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, size: 17, color: _kTextDim),
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 17,
+                color: _kTextDim,
+              ),
             ],
           ),
         ),
@@ -2433,7 +2519,11 @@ class _EditorPageState extends State<EditorPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.keyboard_arrow_up_rounded, size: 20, color: _kTextDim),
+              const Icon(
+                Icons.keyboard_arrow_up_rounded,
+                size: 20,
+                color: _kTextDim,
+              ),
             ],
           ),
         ),
@@ -2563,7 +2653,10 @@ class _EditorPageState extends State<EditorPage> {
             GestureDetector(
               onTap: _autoExposure,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: _kAccent.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(7),
@@ -2572,7 +2665,11 @@ class _EditorPageState extends State<EditorPage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.auto_fix_high_rounded, size: 12, color: _kAccent),
+                    const Icon(
+                      Icons.auto_fix_high_rounded,
+                      size: 12,
+                      color: _kAccent,
+                    ),
                     const SizedBox(width: 5),
                     Text(
                       '自动 ${meter.suggestedEv >= 0 ? '+' : ''}'
@@ -2649,7 +2746,10 @@ class _EditorPageState extends State<EditorPage> {
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
         child: Text(
           '画幅决定片门尺寸，也决定颗粒相对于画面的粗细；选画幅会按片门比例裁剪，位置可以调。',
-          style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.4),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: _kTextDim,
+            height: 1.4,
+          ),
         ),
       ),
       SizedBox(
@@ -2698,7 +2798,11 @@ class _EditorPageState extends State<EditorPage> {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.chevron_right_rounded, size: 16, color: _kTextDim),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 16,
+                    color: _kTextDim,
+                  ),
                 ],
               ),
             ),
@@ -2999,7 +3103,10 @@ class _EditorPageState extends State<EditorPage> {
                 top: 5,
                 right: 5,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1.5,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xCC0A0908),
                     borderRadius: BorderRadius.circular(4),
@@ -3039,7 +3146,12 @@ class _EditorPageState extends State<EditorPage> {
     return text.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
-  Widget _formatChip(ThemeData theme, FilmFormat? format, String label, bool enabled) {
+  Widget _formatChip(
+    ThemeData theme,
+    FilmFormat? format,
+    String label,
+    bool enabled,
+  ) {
     final selected = _format?.id == format?.id;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -3142,13 +3254,18 @@ class _EditorPageState extends State<EditorPage> {
               children: [
                 for (var i = 0; i < values.length; i++)
                   ChoiceChip(
-                    label: Text(labels[i], style: const TextStyle(fontSize: 11)),
+                    label: Text(
+                      labels[i],
+                      style: const TextStyle(fontSize: 11),
+                    ),
                     selected: selected == values[i],
                     showCheckmark: false,
                     visualDensity: VisualDensity.compact,
                     selectedColor: _kAccent.withValues(alpha: 0.2),
                     labelStyle: TextStyle(
-                      color: selected == values[i] ? _kAccent : theme.colorScheme.onSurface,
+                      color: selected == values[i]
+                          ? _kAccent
+                          : theme.colorScheme.onSurface,
                     ),
                     onSelected: enabled ? (_) => onChanged(values[i]) : null,
                   ),
@@ -3217,7 +3334,9 @@ class _EditorPageState extends State<EditorPage> {
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? _kAccent.withValues(alpha: 0.14) : Colors.transparent,
+          color: selected
+              ? _kAccent.withValues(alpha: 0.14)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: selected ? _kAccent.withValues(alpha: 0.55) : _kLineStrong,
@@ -3246,7 +3365,11 @@ class _EditorPageState extends State<EditorPage> {
           children: [
             _qualityPill(theme, PreviewQuality.fast, '实时 · 1600'),
             const SizedBox(width: 6),
-            _qualityPill(theme, PreviewQuality.fine, '精细 · ${_overscanEdge(_fineEdge)}'),
+            _qualityPill(
+              theme,
+              PreviewQuality.fine,
+              '精细 · ${_overscanEdge(_fineEdge)}',
+            ),
             const Spacer(),
           ],
         ),
@@ -3255,7 +3378,8 @@ class _EditorPageState extends State<EditorPage> {
       _sliderRow(
         theme,
         label: '曝光',
-        valueLabel: '${_exposureEv >= 0 ? '+' : ''}${_exposureEv.toStringAsFixed(2)} EV',
+        valueLabel:
+            '${_exposureEv >= 0 ? '+' : ''}${_exposureEv.toStringAsFixed(2)} EV',
         value: _exposureEv,
         min: -4,
         max: 4,
@@ -3433,10 +3557,10 @@ class _EditorPageState extends State<EditorPage> {
     final brand = id.startsWith('ilford')
         ? 'ILFORD'
         : id.startsWith('cinestill')
-            ? 'CINESTILL'
-            : id.startsWith('fujifilm')
-                ? 'FUJIFILM'
-                : 'KODAK';
+        ? 'CINESTILL'
+        : id.startsWith('fujifilm')
+        ? 'FUJIFILM'
+        : 'KODAK';
 
     // Print film and paper are packed on light board with a coloured imprint —
     // the ink is what tells them apart, not the ground.
@@ -3453,8 +3577,8 @@ class _EditorPageState extends State<EditorPage> {
       final ink = id.startsWith('fujifilm')
           ? const Color(0xFF1F5B3A)
           : id.startsWith('ilford')
-              ? const Color(0xFF16161A)
-              : const Color(0xFF2A2018);
+          ? const Color(0xFF16161A)
+          : const Color(0xFF2A2018);
       // A row of seven blown-white boxes is the brightest thing on a dark
       // panel; the board colour is pulled down to a paper cream.
       return _BoxStyle(
@@ -3670,7 +3794,10 @@ class _EditorPageState extends State<EditorPage> {
       name = name.replaceAll(push.group(0)!, '').trim();
     }
 
-    final tokens = name.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    final tokens = name
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toList();
     var speed = '';
     var split = false;
     if (tokens.length > 1) {
@@ -3711,8 +3838,28 @@ class _EditorPageState extends State<EditorPage> {
     return (line: line, speed: speed, tag: tag);
   }
 
+  /// The box, scaled into whatever the caller has room for.
+  ///
+  /// The picker draws it at full size; the strip in the panel asks for a small
+  /// one, and the labels are laid out for the full-size box, so this shrinks a
+  /// finished box rather than re-typesetting it at a smaller font.
+  Widget _stockGlyph(
+    ThemeData theme,
+    Stock stock, {
+    double? width,
+    double? height,
+  }) {
+    final box = _stockBox(stock);
+    if (width == null) return box;
+    return SizedBox(
+      width: width,
+      height: height ?? width * 54 / 44,
+      child: FittedBox(fit: BoxFit.contain, child: box),
+    );
+  }
+
   /// The box itself, at picker size.
-  Widget _stockGlyph(ThemeData theme, Stock stock) {
+  Widget _stockBox(Stock stock) {
     final style = _boxStyle(stock);
     final type = _boxType(stock);
     return Container(
@@ -3723,7 +3870,11 @@ class _EditorPageState extends State<EditorPage> {
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: const Color(0x33000000), width: 0.7),
         boxShadow: const [
-          BoxShadow(color: Color(0x3D000000), blurRadius: 5, offset: Offset(0, 2)),
+          BoxShadow(
+            color: Color(0x3D000000),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
         ],
       ),
       child: ClipRRect(
@@ -3831,7 +3982,10 @@ class _EditorPageState extends State<EditorPage> {
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: ChoiceChip(
-                        label: Text(labels[i], style: const TextStyle(fontSize: 11)),
+                        label: Text(
+                          labels[i],
+                          style: const TextStyle(fontSize: 11),
+                        ),
                         selected: _cameraFilter == values[i],
                         showCheckmark: false,
                         visualDensity: VisualDensity.compact,
@@ -3935,7 +4089,8 @@ class _EditorPageState extends State<EditorPage> {
       _sliderRow(
         theme,
         label: '亮度',
-        valueLabel: '${_layer2.brightness >= 0 ? '+' : ''}${_layer2.brightness.toStringAsFixed(2)} EV',
+        valueLabel:
+            '${_layer2.brightness >= 0 ? '+' : ''}${_layer2.brightness.toStringAsFixed(2)} EV',
         value: _layer2.brightness,
         min: -2,
         max: 2,
@@ -3991,7 +4146,10 @@ class _EditorPageState extends State<EditorPage> {
         padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
         child: Text(
           '调色层作用在渲染结果上，拖动不触发引擎重算，导出时按同一套算式烘进 JPEG。',
-          style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim, height: 1.4),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: _kTextDim,
+            height: 1.4,
+          ),
         ),
       ),
     ];
@@ -4016,7 +4174,9 @@ class _EditorPageState extends State<EditorPage> {
           final theme = Theme.of(context);
           final current = showFilm ? _film : _paper;
           final grouped = groupStocks(
-            _stocks.where((stock) => showFilm ? stock.isFilm : stock.isPrintStock),
+            _stocks.where(
+              (stock) => showFilm ? stock.isFilm : stock.isPrintStock,
+            ),
           );
           return DraggableScrollableSheet(
             expand: false,
@@ -4048,7 +4208,7 @@ class _EditorPageState extends State<EditorPage> {
                 ),
                 for (final entry in grouped.entries) ...[
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.baseline,
                       textBaseline: TextBaseline.alphabetic,
@@ -4072,32 +4232,49 @@ class _EditorPageState extends State<EditorPage> {
                         ),
                         Text(
                           '${entry.value.length}',
-                          style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: _kTextDim,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   for (final stock in entry.value)
-                    ListTile(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-                      leading: _stockGlyph(theme, stock),
-                      title: Text(stock.name, style: theme.textTheme.bodyMedium),
-                      // A print LUT is baked against one film; say which, so
-                      // the fast switch is not a mystery when it does not fire.
-                      subtitle: !showFilm && _printLuts[stock.id] is Map
-                          ? Text(
-                              '印片 LUT · 配 ${_stockName((_printLuts[stock.id] as Map)['paired_film'] as String? ?? '')}',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                fontSize: 10,
-                                color: _kTextDim,
-                              ),
-                            )
-                          : null,
-                      trailing: stock.id == current
-                          ? const Icon(Icons.check_rounded, size: 18, color: _kAccent)
-                          : null,
-                      onTap: () => Navigator.of(context).pop(stock.id),
+                    Padding(
+                      // The boxes are 54 tall, so a dense row leaves them
+                      // touching; a few pixels of air between them is the
+                      // difference between a list and a wall.
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: ListTile(
+                        dense: false,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                        ),
+                        leading: _stockGlyph(theme, stock),
+                        title: Text(
+                          stock.name,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        // A print LUT is baked against one film; say which, so
+                        // the fast switch is not a mystery when it does not fire.
+                        subtitle: !showFilm && _printLuts[stock.id] is Map
+                            ? Text(
+                                '印片 LUT · 配 ${_stockName((_printLuts[stock.id] as Map)['paired_film'] as String? ?? '')}',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontSize: 10,
+                                  color: _kTextDim,
+                                ),
+                              )
+                            : null,
+                        trailing: stock.id == current
+                            ? const Icon(
+                                Icons.check_rounded,
+                                size: 18,
+                                color: _kAccent,
+                              )
+                            : null,
+                        onTap: () => Navigator.of(context).pop(stock.id),
+                      ),
                     ),
                 ],
               ],
@@ -4125,14 +4302,21 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  Widget _sheetSwitch(ThemeData theme, String label, bool selected, VoidCallback onTap) {
+  Widget _sheetSwitch(
+    ThemeData theme,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? _kAccent.withValues(alpha: 0.14) : Colors.transparent,
+          color: selected
+              ? _kAccent.withValues(alpha: 0.14)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: selected ? _kAccent.withValues(alpha: 0.55) : _kLineStrong,
@@ -4192,7 +4376,9 @@ class _EditorPageState extends State<EditorPage> {
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontSize: 11.5,
                         letterSpacing: 0,
-                        color: enabled ? _kText : _kTextDim.withValues(alpha: 0.45),
+                        color: enabled
+                            ? _kText
+                            : _kTextDim.withValues(alpha: 0.45),
                         fontFeatures: const [ui.FontFeature.tabularFigures()],
                       ),
                     ),
@@ -4259,7 +4445,6 @@ class _EditorPageState extends State<EditorPage> {
     });
     _requestLive();
   }
-
 }
 
 /// Which group of sliders the panel is showing.
@@ -4391,8 +4576,16 @@ class _CropPainter extends CustomPainter {
     for (var i = 1; i < 3; i++) {
       final dx = window.left + window.width * i / 3;
       final dy = window.top + window.height * i / 3;
-      canvas.drawLine(Offset(dx, window.top), Offset(dx, window.bottom), thirds);
-      canvas.drawLine(Offset(window.left, dy), Offset(window.right, dy), thirds);
+      canvas.drawLine(
+        Offset(dx, window.top),
+        Offset(dx, window.bottom),
+        thirds,
+      );
+      canvas.drawLine(
+        Offset(window.left, dy),
+        Offset(window.right, dy),
+        thirds,
+      );
     }
     canvas.restore();
   }
@@ -4440,7 +4633,10 @@ class _PreviewPainter extends CustomPainter {
       // Source first, unfiltered and opaque; then the film on top at `strength`.
       // That is a straight linear crossfade in display space, which is what a
       // "how much film" control should feel like.
-      final beforeSize = Size(before.width.toDouble(), before.height.toDouble());
+      final beforeSize = Size(
+        before.width.toDouble(),
+        before.height.toDouble(),
+      );
       final beforeFitted = applyBoxFit(BoxFit.contain, beforeSize, size);
       canvas.drawImageRect(
         before,
@@ -4564,7 +4760,10 @@ class _ExportSheetState extends State<_ExportSheet> {
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
             const SizedBox(height: 16),
-            Text('尺寸', style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim)),
+            Text(
+              '尺寸',
+              style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim),
+            ),
             const SizedBox(height: 8),
             SegmentedButton<int?>(
               showSelectedIcon: false,
@@ -4580,7 +4779,12 @@ class _ExportSheetState extends State<_ExportSheet> {
             const SizedBox(height: 16),
             Row(
               children: [
-                Text('质量', style: theme.textTheme.labelMedium?.copyWith(color: _kTextDim)),
+                Text(
+                  '质量',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: _kTextDim,
+                  ),
+                ),
                 Expanded(
                   child: Slider(
                     value: _quality,
@@ -4613,7 +4817,10 @@ class _ExportSheetState extends State<_ExportSheet> {
               width: double.infinity,
               child: FilledButton.icon(
                 onPressed: () => Navigator.of(context).pop(
-                  _ExportOptions(longEdge: _longEdge, quality: _quality.round()),
+                  _ExportOptions(
+                    longEdge: _longEdge,
+                    quality: _quality.round(),
+                  ),
                 ),
                 icon: const Icon(Icons.download_rounded, size: 18),
                 label: const Text('导出'),
