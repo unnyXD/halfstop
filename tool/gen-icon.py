@@ -1,8 +1,10 @@
 """Generate the Halfstop launcher icon.
 
-The mark is the pen-and-ink camera in `design/icon/artwork.png`, cropped to the
-body: the paper and the wobbly line art are the artwork's own, and this script
-only places it on the plate and writes every density a launcher asks for.
+The mark is the pen-and-ink card in `design/icon/artwork.png`: a camera with
+"半档 | Halfstop" written under it. The paper and the wobbly line art are the
+artwork's own — this script only crops away the generator's watermark, fills the
+card's outside corners with the same paper, and writes every density a launcher
+asks for.
 
 Composing a finished bitmap down (rather than re-rendering per size) is what
 keeps the hatching identical across densities; the artwork is 1184 px wide, so
@@ -34,7 +36,7 @@ PAPER = (242, 234, 220, 255)
 # How much of the canvas the mark takes. Legacy plates can be generous; an
 # adaptive foreground must stay inside the 66dp safe circle of its 108dp
 # canvas, and this camera is ~1.4:1, so it shrinks by width.
-LEGACY_SCALE = 0.92
+LEGACY_SCALE = 0.88
 ADAPTIVE_SCALE = 0.64
 
 FEATHER = 0.05  # share of each edge that fades into the plate

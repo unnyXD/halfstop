@@ -85,7 +85,8 @@ Android 上的物理胶片模拟相机后期应用。Flutter 前端 + Spektrafil
 
 ## 图标
 
-图标是一张钢笔线条的相机插画：`design/icon/artwork.png`（裁到机身，去掉外圈文字与水印），
+图标是一张钢笔线条的卡片插画：相机加手写「半档 | Halfstop」。
+母版是 `design/icon/artwork.png`（方形裁切，去掉生成器的水印、把卡片圆角外的白边填成纸色），
 `python tool/gen-icon.py` 把它排到纸色底版上，一次缩放出所有密度。
 
 | 输出 | 用途 |
