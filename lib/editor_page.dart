@@ -58,6 +58,10 @@ class _EditorPageState extends State<EditorPage> {
   /// what decides how large a frame with 片边 on can be rendered.
   int _maxPlanePixels = 0;
 
+  /// Papers that ship a print LUT, from `print_luts.json`: each is baked
+  /// against one film, so the table is only exact for that pairing.
+  Map<String, dynamic> _printLuts = const {};
+
   EngineWorker? _worker;
   String? _resourcesDir;
   List<Stock> _stocks = const [];
@@ -363,8 +367,21 @@ class _EditorPageState extends State<EditorPage> {
     final worker = _worker;
     if (worker == null) return;
     final budget = await worker.maxPlanePixels();
-    if (!mounted || budget == _maxPlanePixels) return;
-    setState(() => _maxPlanePixels = budget);
+    if (!mounted) return;
+    if (budget != _maxPlanePixels) setState(() => _maxPlanePixels = budget);
+    if (_printLuts.isEmpty) {
+      final luts = await worker.printLutCatalog();
+      if (mounted && luts.isNotEmpty) setState(() => _printLuts = luts);
+    }
+  }
+
+  /// The LUT's own film, when the current film is the one it was baked with.
+  /// A table from another film still runs, but it is an approximation the
+  /// engine warns about, so the fast path stays off.
+  bool _lutMatchesFilm(String paper) {
+    final entry = _printLuts[paper];
+    if (entry is! Map) return false;
+    return entry['paired_film'] == _film;
   }
 
   Map<String, Object?> _frameDelta() {
@@ -1054,6 +1071,23 @@ class _EditorPageState extends State<EditorPage> {
     });
     if (!hadSession) return;
     try {
+      // A paper whose LUT was baked for this film is drawn from the table over
+      // the negative already in memory — but only *before* the new params are
+      // pushed, since a stock change invalidates the cached print and the
+      // table would then be run against a cold one. The params follow right
+      // after, so the next render uses the new paper.
+      final lutFast = key == 'print_stock' &&
+          _quality == PreviewQuality.fast &&
+          _lutMatchesFilm(_paper);
+      RenderFrame? fastFrame;
+      if (lutFast) {
+        try {
+          fastFrame = await _worker!.previewStockLut(_paper, tier: 'live');
+        } catch (_) {
+          // No table, or nothing warm to run it over: the reprint below covers
+          // it, a few hundred milliseconds slower.
+        }
+      }
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
@@ -1062,6 +1096,10 @@ class _EditorPageState extends State<EditorPage> {
         // The rebate carries the stock's name, so it has to change with it.
         if (_overscanOn) 'overscan_edge_text': _edgeText.isEmpty ? _defaultEdgeText : _edgeText,
       });
+      if (fastFrame != null) {
+        await _showFrame(fastFrame, fast: true, wallMs: null);
+        return;
+      }
       final stopwatch = Stopwatch()..start();
       final frame = await _worker!.reprint(tier: 'live');
       stopwatch.stop();
@@ -3540,6 +3578,17 @@ class _EditorPageState extends State<EditorPage> {
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
                       title: Text(stock.name, style: theme.textTheme.bodyMedium),
+                      // A print LUT is baked against one film; say which, so
+                      // the fast switch is not a mystery when it does not fire.
+                      subtitle: !showFilm && _printLuts[stock.id] is Map
+                          ? Text(
+                              '印片 LUT · 配 ${_stockName((_printLuts[stock.id] as Map)['paired_film'] as String? ?? '')}',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 10,
+                                color: _kTextDim,
+                              ),
+                            )
+                          : null,
                       trailing: stock.id == current
                           ? const Icon(Icons.check_rounded, size: 18, color: _kAccent)
                           : null,

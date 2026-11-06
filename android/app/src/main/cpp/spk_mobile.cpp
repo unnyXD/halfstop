@@ -854,6 +854,51 @@ spk_mobile_frame* spk_mobile_session_reprint(spk_mobile_session* handle, const c
 
 // The "before" side of a comparison: the source before the film, no negative
 // and no print touched.
+// Which papers carry a shipped LUT, straight from print_luts.json.
+char* spk_mobile_print_lut_catalog(spk_engine* engine) {
+    if (engine == nullptr) return copy_to_c("{}");
+    return copy_to_c(spk_print_lut_catalog(engine));
+}
+
+// Switch papers through the LUT instead of reprinting: 2 ms against 34 ms at
+// the preview tier, because the cached negative is already there and the table
+// is three vectors. The engine warns when the film is not the one the table
+// was baked against; the caller decides whether that matters.
+spk_mobile_frame* spk_mobile_session_preview_stock_lut(spk_mobile_session* handle,
+                                                       const char* print_stock, const char* tier,
+                                                       char** out_json) {
+    if (out_json != nullptr) *out_json = nullptr;
+    try {
+        if (handle == nullptr || handle->session == nullptr) {
+            fail_reply(out_json, "arguments", "session is null");
+            return nullptr;
+        }
+        if (print_stock == nullptr || *print_stock == '\0') {
+            fail_reply(out_json, "arguments", "print_stock is required");
+            return nullptr;
+        }
+        const std::string tier_name = (tier != nullptr && *tier != '\0') ? tier : "live";
+
+        spk_result result{};
+        const auto t = Clock::now();
+        const spk_status status =
+            spk_preview_stock_lut(handle->session, print_stock, tier_name.c_str(), &result, nullptr);
+        const double render_ms = elapsed_ms(t);
+        if (status != SPK_OK) {
+            spk_result_free(&result);
+            fail_reply(out_json, "lut", spk_last_error(handle->engine));
+            return nullptr;
+        }
+        return frame_from_result(result, tier_name.c_str(), render_ms, /*linear_source=*/false, out_json);
+    } catch (const std::exception& e) {
+        fail_reply(out_json, "internal", e.what());
+        return nullptr;
+    } catch (...) {
+        fail_reply(out_json, "internal", "unknown failure in spk_mobile_session_preview_stock_lut");
+        return nullptr;
+    }
+}
+
 spk_mobile_frame* spk_mobile_session_export_source(spk_mobile_session* handle, const char* tier,
                                                    char** out_json) {
     if (out_json != nullptr) *out_json = nullptr;

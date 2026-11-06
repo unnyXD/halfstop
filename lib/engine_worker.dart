@@ -185,6 +185,19 @@ class EngineWorker {
     return _frame(await _call('exportSource', {'tier': tier}));
   }
 
+  /// Which papers ship a print LUT, keyed by stock: `paired_film`,
+  /// `declared_pairing`, `lut_size`.
+  Future<Map<String, dynamic>> printLutCatalog() async {
+    final result = await _call('printLutCatalog');
+    return (result as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
+  /// Switches papers through the LUT instead of reprinting the print chain,
+  /// 2 ms against 34 ms at the preview tier.
+  Future<RenderFrame> previewStockLut(String stock, {String tier = 'live'}) async {
+    return _frame(await _call('previewStockLut', {'stock': stock, 'tier': tier}));
+  }
+
   Future<String> buildInfo() async {
     return (await _call('buildInfo')) as String? ?? 'unknown';
   }
@@ -310,6 +323,13 @@ class _NativeSession {
     );
     _maxPlanePixels = library.lookupFunction<Uint64 Function(Pointer<Void>),
         int Function(Pointer<Void>)>('spk_mobile_max_plane_pixels');
+    _previewStockLut = library.lookupFunction<
+        Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>,
+            Pointer<Pointer<Utf8>>),
+        Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>,
+            Pointer<Pointer<Utf8>>)>('spk_mobile_session_preview_stock_lut');
+    _lutCatalog = library.lookupFunction<Pointer<Utf8> Function(Pointer<Void>),
+        Pointer<Utf8> Function(Pointer<Void>)>('spk_mobile_print_lut_catalog');
     _openRaw = library.lookupFunction<
         Pointer<Void> Function(
             Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
@@ -381,6 +401,9 @@ class _NativeSession {
   late final int Function(Pointer<Void>, Pointer<Pointer<Utf8>>) _capabilities;
   late final int Function(Pointer<Void>) _maxPlanePixels;
   late final Pointer<Void> Function(
+      Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _previewStockLut;
+  late final Pointer<Utf8> Function(Pointer<Void>) _lutCatalog;
+  late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openRaw;
   late final Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
       Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openImage;
@@ -422,6 +445,10 @@ class _NativeSession {
         return _handleFrame(_reprint, args, fallbackTier: 'live', stage: 'reprint');
       case 'render':
         return _handleFrame(_render, args, fallbackTier: 'preview', stage: 'render');
+      case 'previewStockLut':
+        return _handlePreviewStockLut(args);
+      case 'printLutCatalog':
+        return _handleLutCatalog();
       case 'exportSource':
         return _handleFrame(_exportSource, args,
             fallbackTier: 'live', stage: 'source');
@@ -555,6 +582,46 @@ class _NativeSession {
     } finally {
       malloc.free(replySlot);
     }
+  }
+
+  Map<String, Object?> _handlePreviewStockLut(Map<String, Object?> args) {
+    if (_session == nullptr) {
+      throw EngineFailure('arguments', 'no RAW is open');
+    }
+    final stock = (args['stock'] as String? ?? '').trim();
+    if (stock.isEmpty) {
+      throw EngineFailure('arguments', 'stock is required');
+    }
+    final tier = (args['tier'] as String?)?.trim();
+    final stockPtr = stock.toNativeUtf8();
+    final tierPtr = (tier == null || tier.isEmpty ? 'live' : tier).toNativeUtf8();
+    final replySlot = malloc<Pointer<Utf8>>();
+    replySlot.value = nullptr;
+    Pointer<Void> frame = nullptr;
+    try {
+      frame = _previewStockLut(_session, stockPtr, tierPtr, replySlot);
+      final reply = _takeReply(replySlot);
+      if (frame == nullptr) {
+        throw _failureFrom(reply, 'lut');
+      }
+      return _frameMap(frame, reply);
+    } finally {
+      if (frame != nullptr) _frameRelease(frame);
+      malloc.free(stockPtr);
+      malloc.free(tierPtr);
+      malloc.free(replySlot);
+    }
+  }
+
+  Map<String, dynamic> _handleLutCatalog() {
+    if (_engine == nullptr) {
+      throw EngineFailure('arguments', 'engine is not created');
+    }
+    final text = _lutCatalog(_engine);
+    if (text == nullptr) return const {};
+    final copy = text.toDartString();
+    _stringFree(text);
+    return (jsonDecode(copy) as Map).cast<String, dynamic>();
   }
 
   Map<String, Object?> _handleFrame(
