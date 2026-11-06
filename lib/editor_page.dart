@@ -1913,7 +1913,7 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(height: 20),
             Text(
-              '物理胶片模拟 · 光谱计算全在本机',
+              '不是滤镜，是冲印',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
             ),
@@ -1943,16 +1943,6 @@ class _EditorPageState extends State<EditorPage> {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '两条路都走同一套胶片模型：相册图片由本机转成线性 ProPhoto，RAW 交给 LibRaw。',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 10,
-                height: 1.5,
-                color: _kTextDim.withValues(alpha: 0.8),
-              ),
             ),
             if (_cached.isNotEmpty) ...[
               const SizedBox(height: 26),
