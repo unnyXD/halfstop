@@ -3420,40 +3420,388 @@ class _EditorPageState extends State<EditorPage> {
     ];
   }
 
-  /// The lens filter, as Wratten numbers. Scrolled rather than wrapped: nine
-  /// chips on two lines pushed the label into the gap between them.
-  /// A square the colour of the maker's box, with the speed on it: a column of
-  /// identical rows is hard to scan, and the profiles carry no artwork to use.
-  static Color _brandColor(String id) {
-    if (id.startsWith('kodak')) return const Color(0xFFD8A32B);
-    if (id.startsWith('fujifilm')) return const Color(0xFF2F7D5A);
-    if (id.startsWith('cinestill')) return const Color(0xFFB2453A);
-    if (id.startsWith('agfa')) return const Color(0xFFB24A5C);
-    return const Color(0xFF8A8177);
+  /// The box a stock comes in, as colour: the maker's ground, the printing ink,
+  /// the band across the top and what is written on it.
+  ///
+  /// Drawn rather than shipped as artwork. Twenty-eight product photos would be
+  /// tens of megabytes in the APK, and the designs belong to the makers — these
+  /// are the colours people recognise on a shelf, not reproductions.
+  static _BoxStyle _boxStyle(Stock stock) {
+    final id = stock.id;
+    // Ilford and CineStill print their own names on the band; everything else
+    // in the bundle is Kodak or Fuji.
+    final brand = id.startsWith('ilford')
+        ? 'ILFORD'
+        : id.startsWith('cinestill')
+            ? 'CINESTILL'
+            : id.startsWith('fujifilm')
+                ? 'FUJIFILM'
+                : 'KODAK';
+
+    // Print film and paper are packed on light board with a coloured imprint —
+    // the ink is what tells them apart, not the ground.
+    if (stock.category == StockCategory.printFilm) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFF26262A),
+        ink: const Color(0xFFE6A33C),
+        band: const Color(0xFF141416),
+        bandInk: const Color(0xFFE6A33C),
+      );
+    }
+    if (stock.category == StockCategory.paper) {
+      final ink = id.startsWith('fujifilm')
+          ? const Color(0xFF1F5B3A)
+          : id.startsWith('ilford')
+              ? const Color(0xFF16161A)
+              : const Color(0xFF2A2018);
+      // A row of seven blown-white boxes is the brightest thing on a dark
+      // panel; the board colour is pulled down to a paper cream.
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFFE6E0D1),
+        ink: ink,
+        band: ink,
+        bandInk: const Color(0xFFF4F1E8),
+      );
+    }
+
+    // Camera films. Order matters: `ektar` must not catch `ektachrome`, and
+    // `portra` is checked after the papers above so Portra Endura stays a box.
+    // The black-and-white and cine stocks: their boxes are the opposite of
+    // colour negative — dark grounds, so the name is the light thing on them.
+    if (id.contains('hp5')) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFF1D1D1F),
+        ink: const Color(0xFFF3F1EA),
+        band: const Color(0xFF0C0C0E),
+        bandInk: const Color(0xFFD8D4C8),
+      );
+    }
+    if (id.contains('tmax')) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFFE9E4D6),
+        ink: const Color(0xFF181818),
+        band: const Color(0xFFD9A32C),
+        bandInk: const Color(0xFF231A05),
+      );
+    }
+    if (id.contains('tri_x') || id.contains('trix')) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFFE3B02C),
+        ink: const Color(0xFF1A1608),
+        band: const Color(0xFFC0392B),
+        bandInk: const Color(0xFFFFF3DC),
+      );
+    }
+    if (id.contains('acros')) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFF191A1D),
+        ink: const Color(0xFFEFEFE8),
+        band: const Color(0xFF343841),
+        bandInk: const Color(0xFFEFEFE8),
+      );
+    }
+    if (id.contains('cinestill')) {
+      return _BoxStyle(
+        brand: brand,
+        body: const Color(0xFF141416),
+        ink: const Color(0xFFE2453A),
+        band: const Color(0xFFB93528),
+        bandInk: const Color(0xFFFBEDE6),
+      );
+    }
+    if (id.contains('gold')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFFE9A81C),
+        ink: Color(0xFF1A1206),
+        band: Color(0xFFC0392B),
+        bandInk: Color(0xFFFFF3DC),
+      );
+    }
+    if (id.contains('ultramax')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFFF0A21E),
+        ink: Color(0xFF1A1206),
+        band: Color(0xFFC0392B),
+        bandInk: Color(0xFFFFF3DC),
+      );
+    }
+    if (id.contains('ektar')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFFB4362A),
+        ink: Color(0xFFFDF3E7),
+        band: Color(0xFF7E2118),
+        bandInk: Color(0xFFFDF3E7),
+      );
+    }
+    if (id.contains('portra')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFFEFC963),
+        ink: Color(0xFF241C0C),
+        band: Color(0xFFC0392B),
+        bandInk: Color(0xFFFFF6E2),
+      );
+    }
+    if (id.contains('kodachrome')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFFF2C218),
+        ink: Color(0xFFA8231B),
+        band: Color(0xFFA8231B),
+        bandInk: Color(0xFFF7D34A),
+      );
+    }
+    if (id.contains('ektachrome')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFF1E4E8C),
+        ink: Color(0xFFF2F5FA),
+        band: Color(0xFF0E2C55),
+        bandInk: Color(0xFFF2F5FA),
+      );
+    }
+    if (id.contains('vision3')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFF232326),
+        ink: Color(0xFFEDE7DA),
+        band: Color(0xFF3A3A3F),
+        bandInk: Color(0xFFEDE7DA),
+      );
+    }
+    if (id.contains('verita')) {
+      return const _BoxStyle(
+        brand: 'KODAK',
+        body: Color(0xFF4C5A63),
+        ink: Color(0xFFF0EDE4),
+        band: Color(0xFF2C363C),
+        bandInk: Color(0xFFF0EDE4),
+      );
+    }
+    if (id.contains('c200')) {
+      return const _BoxStyle(
+        brand: 'FUJIFILM',
+        body: Color(0xFF1F6B3C),
+        ink: Color(0xFFF3F7F0),
+        band: Color(0xFF0F3E22),
+        bandInk: Color(0xFFDFF0E2),
+      );
+    }
+    if (id.contains('xtra')) {
+      return const _BoxStyle(
+        brand: 'FUJIFILM',
+        body: Color(0xFF2C7A46),
+        ink: Color(0xFFF3F7F0),
+        band: Color(0xFF16512C),
+        bandInk: Color(0xFFDFF0E2),
+      );
+    }
+    if (id.contains('400h')) {
+      return const _BoxStyle(
+        brand: 'FUJIFILM',
+        body: Color(0xFFA9C9AE),
+        ink: Color(0xFF14351D),
+        band: Color(0xFF2E6841),
+        bandInk: Color(0xFFF4F8F4),
+      );
+    }
+    if (id.contains('velvia')) {
+      return const _BoxStyle(
+        brand: 'FUJIFILM',
+        body: Color(0xFF17181A),
+        ink: Color(0xFFE9EFE6),
+        band: Color(0xFF2E7D45),
+        bandInk: Color(0xFFE9EFE6),
+      );
+    }
+    if (id.contains('provia')) {
+      return const _BoxStyle(
+        brand: 'FUJIFILM',
+        body: Color(0xFF1C5FA5),
+        ink: Color(0xFFF2F6FB),
+        band: Color(0xFF0F3A68),
+        bandInk: Color(0xFFF2F6FB),
+      );
+    }
+    return const _BoxStyle(
+      brand: 'FILM',
+      body: Color(0xFF5A544C),
+      ink: Color(0xFFF2EDE3),
+      band: Color(0xFF3A352F),
+      bandInk: Color(0xFFF2EDE3),
+    );
   }
 
+  /// What is printed on the box: the line's name, the speed, and a push tag.
+  ///
+  /// The profiles only carry one display string ("Kodak Portra 800 (Push 2)"),
+  /// so it has to be taken apart: drop the maker, pull the push off the end,
+  /// and split the speed from the line — but `Vision3 250D` keeps its D, and
+  /// `C200` has no space to split on at all.
+  static ({String line, String speed, String tag}) _boxType(Stock stock) {
+    var name = stock.name;
+    for (final prefix in const [
+      'Kodak Professional ',
+      'Kodak ',
+      'Fujifilm ',
+      'CineStill ',
+      'Ilford ',
+      'Agfa ',
+    ]) {
+      if (name.startsWith(prefix)) {
+        name = name.substring(prefix.length);
+        break;
+      }
+    }
+
+    var tag = '';
+    final push = RegExp(r'\(Push\s*(\d)\)').firstMatch(name);
+    if (push != null) {
+      tag = '+${push.group(1)}';
+      name = name.replaceAll(push.group(0)!, '').trim();
+    }
+
+    final tokens = name.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    var speed = '';
+    var split = false;
+    if (tokens.length > 1) {
+      final last = tokens.last;
+      if (RegExp(r'^\d{2,4}$').hasMatch(last) ||
+          RegExp(r'^\d{2,4}[A-Z]$').hasMatch(last)) {
+        speed = tokens.removeLast();
+        split = true;
+      }
+    }
+
+    var line = tokens.join(' ').toUpperCase();
+    // "Neopan 100 Acros II" is three words of product name; a box this small
+    // only carries the first one.
+    if (line.contains(' ') && line.length > 11) {
+      line = line.split(' ').first;
+    }
+    // "Pro 400H" loses its name along with the speed; put it back.
+    if (split && line.length <= 3) {
+      line = '$line $speed';
+      speed = '';
+    }
+    // A copy stock is named by its number: 2383, not "Vision".
+    if (stock.category == StockCategory.printFilm) {
+      line = speed.isEmpty ? line : speed;
+      speed = '';
+    }
+    if (stock.category == StockCategory.paper) {
+      // "Crystal Archive Type II" and "Ektacolor Edge" do not fit on a box.
+      if (line.startsWith('CRYSTAL')) {
+        line = 'CRYSTAL';
+      } else if (line.startsWith('EKTACOLOR')) {
+        line = 'EDGE';
+      } else {
+        line = line.split(' ').first;
+      }
+    }
+    return (line: line, speed: speed, tag: tag);
+  }
+
+  /// The box itself, at picker size.
   Widget _stockGlyph(ThemeData theme, Stock stock) {
-    final colour = _brandColor(stock.id);
-    final speed = RegExp(r'(\d{2,4})').firstMatch(stock.name)?.group(1);
-    final letters =
-        stock.name.replaceAll(RegExp(r'[^A-Za-z]'), '').toUpperCase();
-    final label = speed ?? (letters.isEmpty ? '·' : letters.substring(0, letters.length >= 2 ? 2 : 1));
+    final style = _boxStyle(stock);
+    final type = _boxType(stock);
     return Container(
-      width: 40,
-      height: 40,
-      alignment: Alignment.center,
+      width: 44,
+      height: 54,
       decoration: BoxDecoration(
-        color: colour.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colour.withValues(alpha: 0.5)),
+        color: style.body,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0x33000000), width: 0.7),
+        boxShadow: const [
+          BoxShadow(color: Color(0x3D000000), blurRadius: 5, offset: Offset(0, 2)),
+        ],
       ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelMedium?.copyWith(
-          fontSize: label.length > 2 ? 10.5 : 12,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.4,
-          color: colour,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3.2),
+        child: Column(
+          children: [
+            Container(
+              height: 11,
+              width: double.infinity,
+              color: style.band,
+              alignment: Alignment.center,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    style.brand,
+                    style: TextStyle(
+                      fontSize: 5.4,
+                      height: 1,
+                      letterSpacing: 0.7,
+                      fontWeight: FontWeight.w700,
+                      color: style.bandInk,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(3, 2, 3, 1),
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      type.line,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 8,
+                        height: 1.05,
+                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w800,
+                        color: style.ink,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (type.speed.isNotEmpty || type.tag.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(3, 0, 3, 3),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      type.speed,
+                      style: TextStyle(
+                        fontSize: 6.2,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        color: style.ink.withValues(alpha: 0.85),
+                      ),
+                    ),
+                    if (type.tag.isNotEmpty)
+                      Text(
+                        type.tag,
+                        style: TextStyle(
+                          fontSize: 6.2,
+                          height: 1,
+                          fontWeight: FontWeight.w700,
+                          color: style.ink.withValues(alpha: 0.7),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -4122,6 +4470,30 @@ class _PreviewPainter extends CustomPainter {
 }
 
 /// One undo step: every user-editable value at the moment a gesture started.
+/// The colours of one stock's packaging, as far as a 44 x 54 box can say.
+class _BoxStyle {
+  const _BoxStyle({
+    required this.brand,
+    required this.body,
+    required this.ink,
+    required this.band,
+    required this.bandInk,
+  });
+
+  /// The maker's name on the band across the top.
+  final String brand;
+
+  /// The board the box is printed on.
+  final Color body;
+
+  /// What the line name is printed in.
+  final Color ink;
+
+  /// The band itself, and the brand name on it.
+  final Color band;
+  final Color bandInk;
+}
+
 class _EditSnapshot {
   const _EditSnapshot({
     required this.film,
