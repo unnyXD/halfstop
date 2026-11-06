@@ -2176,6 +2176,9 @@ class _EditorPageState extends State<EditorPage> {
                 )
               : _buildCollapsedBar(theme),
         ),
+        // The histogram sits outside the list: it is a read-out of the frame,
+        // so it has to stay put while a thumb travels down the sliders.
+        if (_panelLayer == _PanelLayer.color) _histogramStrip(theme),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.only(top: 2, bottom: 10),
@@ -3419,6 +3422,43 @@ class _EditorPageState extends State<EditorPage> {
 
   /// The lens filter, as Wratten numbers. Scrolled rather than wrapped: nine
   /// chips on two lines pushed the label into the gap between them.
+  /// A square the colour of the maker's box, with the speed on it: a column of
+  /// identical rows is hard to scan, and the profiles carry no artwork to use.
+  static Color _brandColor(String id) {
+    if (id.startsWith('kodak')) return const Color(0xFFD8A32B);
+    if (id.startsWith('fujifilm')) return const Color(0xFF2F7D5A);
+    if (id.startsWith('cinestill')) return const Color(0xFFB2453A);
+    if (id.startsWith('agfa')) return const Color(0xFFB24A5C);
+    return const Color(0xFF8A8177);
+  }
+
+  Widget _stockGlyph(ThemeData theme, Stock stock) {
+    final colour = _brandColor(stock.id);
+    final speed = RegExp(r'(\d{2,4})').firstMatch(stock.name)?.group(1);
+    final letters =
+        stock.name.replaceAll(RegExp(r'[^A-Za-z]'), '').toUpperCase();
+    final label = speed ?? (letters.isEmpty ? '·' : letters.substring(0, letters.length >= 2 ? 2 : 1));
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colour.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colour.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelMedium?.copyWith(
+          fontSize: label.length > 2 ? 10.5 : 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+          color: colour,
+        ),
+      ),
+    );
+  }
+
   Widget _filterRow(ThemeData theme, bool enabled) {
     const values = ['', 'w8', 'w11', 'w12', 'w15', 'w21', 'w25', 'w47', 'w58'];
     const labels = ['无', 'W8', 'W11', 'W12', 'W15', 'W21', 'W25', 'W47', 'W58'];
@@ -3499,47 +3539,51 @@ class _EditorPageState extends State<EditorPage> {
 
   /// Layer 2 controls: a GPU colour matrix. No engine call, no `_busy`, so the
   /// preview keeps up with the thumb.
+  /// The histogram of the frame, pinned above the colour sliders.
+  Widget _histogramStrip(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
+      child: Row(
+        children: [
+          if (_showHistogram) ...[
+            HistogramView(data: _histogram, width: 132, height: 40),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => setState(() => _showHistogram = false),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  '隐藏',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 10.5,
+                    color: _kTextDim,
+                  ),
+                ),
+              ),
+            ),
+          ] else
+            GestureDetector(
+              onTap: () => setState(() => _showHistogram = true),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '显示直方图',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 10.5,
+                    color: _kAccent.withValues(alpha: 0.85),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _colorSliders(ThemeData theme, bool canRender) {
     final enabled = _hasSession && !_busy;
     return [
       _sectionHeader(theme, '色彩', onReset: enabled ? _resetColor : null),
-      if (_showHistogram)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Row(
-            children: [
-              HistogramView(data: _histogram, width: 132, height: 44),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => setState(() => _showHistogram = false),
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Text(
-                    '隐藏',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: 10.5,
-                      color: _kTextDim,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        )
-      else
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: GestureDetector(
-            onTap: () => setState(() => _showHistogram = true),
-            child: Text(
-              '显示直方图',
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 10.5,
-                color: _kAccent.withValues(alpha: 0.85),
-              ),
-            ),
-          ),
-        ),
       _sliderRow(
         theme,
         label: '亮度',
@@ -3689,6 +3733,7 @@ class _EditorPageState extends State<EditorPage> {
                     ListTile(
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                      leading: _stockGlyph(theme, stock),
                       title: Text(stock.name, style: theme.textTheme.bodyMedium),
                       // A print LUT is baked against one film; say which, so
                       // the fast switch is not a mystery when it does not fire.
