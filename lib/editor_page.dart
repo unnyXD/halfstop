@@ -356,13 +356,29 @@ class _EditorPageState extends State<EditorPage> {
       ((_openInfo['input'] as Map?)?['source_height'] as num?)?.toInt() ??
       _imageHeight;
 
+  /// The shape the engine checks the frame against.
+  ///
+  /// A half-frame pair is two 18 mm frames one advance apart, so its gate is
+  /// 37 x 24 — not the 24 x 18 of a single half frame. Handing a single frame's
+  /// shape to a pair is what "a 1199 x 900 frame is not the 135_half gate's
+  /// shape (37 x 24)" complains about.
+  double get _gateRatio {
+    final format = _format;
+    if (format == null) return 1;
+    if (_pair && format.id == '135_half') {
+      const advance = 19.0; // one half-frame advance along the film
+      return (format.shortEdge + advance) / format.longEdge;
+    }
+    return format.ratio;
+  }
+
   /// The crop that makes this frame the selected gate's shape. Null format
   /// means "leave the frame alone".
   CropBox get _cropBox {
     final format = _format;
     if (format == null) return CropBox.full;
     return _crop ??
-        centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
+        centreCropForRatio(_gateRatio, _sourceWidth, _sourceHeight);
   }
 
   /// The largest gate long edge that still fits the device's buffer once the
@@ -373,7 +389,7 @@ class _EditorPageState extends State<EditorPage> {
     if (!_overscanOn || format == null || _maxPlanePixels <= 0) return desired;
     return clampOverscanLongEdge(
       desiredEdge: desired,
-      frameAspect: format.ratio,
+      frameAspect: _gateRatio,
       format: format,
       mode: _overscanMode,
       carrier: _carrier,
@@ -2944,7 +2960,12 @@ class _EditorPageState extends State<EditorPage> {
             value: _pair,
             enabled: enabled,
             onChanged: (value) {
-              setState(() => _pair = value);
+              setState(() {
+                _pair = value;
+                // The gate changes shape, so a crop picked for one half frame
+                // no longer fits the pair.
+                _crop = null;
+              });
               _applyFrame(label: value ? '拼第二格…' : '收第二格…');
             },
           ),
