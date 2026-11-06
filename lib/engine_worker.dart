@@ -195,6 +195,15 @@ class EngineWorker {
     return (result as Map?)?.cast<String, dynamic>() ?? const {};
   }
 
+  /// The largest frame this device can bind, in pixels (12 B/px).
+  ///
+  /// The overscan canvas is a second allocation bigger than the frame, so the
+  /// editor asks for this once and picks tier sizes that fit inside it.
+  Future<int> maxPlanePixels() async {
+    final result = await _call('maxPlanePixels');
+    return (result as num?)?.toInt() ?? 0;
+  }
+
   Future<void> close() async {
     if (_closed) return;
     try {
@@ -299,6 +308,8 @@ class _NativeSession {
         int Function(Pointer<Void>, Pointer<Pointer<Utf8>>)>(
       'spk_mobile_engine_capabilities',
     );
+    _maxPlanePixels = library.lookupFunction<Uint64 Function(Pointer<Void>),
+        int Function(Pointer<Void>)>('spk_mobile_max_plane_pixels');
     _openRaw = library.lookupFunction<
         Pointer<Void> Function(
             Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
@@ -368,6 +379,7 @@ class _NativeSession {
       _engineCreate;
   late final void Function(Pointer<Void>) _engineDestroy;
   late final int Function(Pointer<Void>, Pointer<Pointer<Utf8>>) _capabilities;
+  late final int Function(Pointer<Void>) _maxPlanePixels;
   late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openRaw;
   late final Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
@@ -417,6 +429,9 @@ class _NativeSession {
         return _buildInfo().toDartString();
       case 'capabilities':
         return _handleCapabilities();
+      case 'maxPlanePixels':
+        if (_engine == nullptr) return 0;
+        return _maxPlanePixels(_engine);
       case 'status':
         return {
           'engine': _engine != nullptr,

@@ -12,6 +12,7 @@ import 'engine_bridge.dart';
 import 'engine_worker.dart';
 import 'exporter.dart';
 import 'frame_format.dart';
+import 'render_budget.dart';
 import 'histogram.dart';
 import 'layer2.dart';
 import 'photo_import.dart';
@@ -49,6 +50,12 @@ class EditorPage extends StatefulWidget {
 
 class _EditorPageState extends State<EditorPage> {
   static const int _previewEdge = 1600;
+  static const int _fineEdge = 3400;
+
+  /// The device's plane budget in pixels (12 B/px), 0 until the engine says.
+  /// The rebate canvas is a second allocation bigger than the frame, so this is
+  /// what decides how large a frame with 片边 on can be rendered.
+  int _maxPlanePixels = 0;
 
   EngineWorker? _worker;
   String? _resourcesDir;
@@ -142,16 +149,39 @@ class _EditorPageState extends State<EditorPage> {
   double _cropGestureScale = 1;
   bool _overscanOn = false;
   /// `strip` lays out the whole film width, `filed` a sliver of rebate.
-  final String _overscanMode = 'strip';
+  String _overscanMode = 'strip';
   String _holes = 'white';
   String _carrier = 'none';
   double _edgeFog = 1;
   double _leaks = 0;
 
+  /// The gate's shape. `auto` draws whatever the real cameras for the format
+  /// used; the rest pick one family outright.
+  String _gate = 'auto';
+
+  /// What the manufacturer's edge print says. Empty keeps the stock's own,
+  /// which is what a real strip has; anything else overrides it.
+  String _edgeText = '';
+
+  /// The frame number on the edge print; -1 means "the frame's own draw".
+  int _frameNumber = -1;
+
+  /// The aperture printed beside the frame, in stops. 0 = not recorded, and
+  /// the engine falls back to f/5.6.
+  double _fNumber = 0;
+
+  /// Two half-frames on one strip (135_half only).
+  bool _pair = false;
+
   bool _dateOn = false;
   String _dateText = '';
   String _dateStyle = 'lcd';
   String _datePlacement = 'frame';
+  String _dateCorner = 'br';
+  double _dateSize = 1;
+
+  /// The shooting data printed beside the date (1.3.1): ISO, shutter, aperture.
+  String _dataText = '';
 
   @override
   void initState() {
@@ -300,6 +330,33 @@ class _EditorPageState extends State<EditorPage> {
         centreCropForRatio(format.ratio, _sourceWidth, _sourceHeight);
   }
 
+  /// The largest gate long edge that still fits the device's buffer once the
+  /// rebate is laid around it. [desired] comes back untouched when it fits,
+  /// which is the common case on formats that are not 120 panoramas.
+  int _overscanEdge(int desired) {
+    final format = _format;
+    if (!_overscanOn || format == null || _maxPlanePixels <= 0) return desired;
+    return clampOverscanLongEdge(
+      desiredEdge: desired,
+      frameAspect: format.ratio,
+      format: format,
+      mode: _overscanMode,
+      carrier: _carrier,
+      pair: _pair && format.id == '135_half',
+      budgetPixels: (_maxPlanePixels * kOverscanHeadroom).round(),
+    );
+  }
+
+  /// One call after the session opens: the budget is a device property, not a
+  /// session one.
+  Future<void> _syncBudget() async {
+    final worker = _worker;
+    if (worker == null) return;
+    final budget = await worker.maxPlanePixels();
+    if (!mounted || budget == _maxPlanePixels) return;
+    setState(() => _maxPlanePixels = budget);
+  }
+
   Map<String, Object?> _frameDelta() {
     final crop = _cropBox;
     return {
@@ -307,16 +364,25 @@ class _EditorPageState extends State<EditorPage> {
       'geometry_crop_y': crop.y,
       'geometry_crop_w': crop.width,
       'geometry_crop_h': crop.height,
+      'preview_long_edge': _overscanEdge(_previewEdge),
       'overscan_active': _format != null && _overscanOn,
       if (_format != null) 'overscan_format': _format!.id,
       'overscan_mode': _overscanMode,
       'overscan_holes': _holes,
       'overscan_carrier': _carrier,
+      'overscan_gate': _gate,
       'overscan_fog': _edgeFog,
       'overscan_leaks': _leaks,
+      if (_edgeText.isNotEmpty) 'overscan_edge_text': _edgeText,
+      if (_frameNumber >= 0) 'overscan_frame_number': _frameNumber,
+      if (_fNumber > 0) 'overscan_f_number': _fNumber,
+      'overscan_pair': _pair && _format?.id == '135_half',
       'date_imprint_active': _dateOn,
       if (_dateOn) 'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
       if (_dateOn) 'date_imprint_style': _dateStyle,
+      if (_dateOn) 'date_imprint_corner': _dateCorner,
+      if (_dateOn) 'date_imprint_size': _dateSize,
+      if (_dateOn && _dataText.isNotEmpty) 'date_imprint_data_text': _dataText,
       // The rebate only exists when the rebate is drawn.
       if (_dateOn)
         'date_imprint_placement':
@@ -518,6 +584,80 @@ class _EditorPageState extends State<EditorPage> {
     await _applyFrame(label: '重打日期…');
   }
 
+  /// Shared prompt for the free-text edge print, the frame number and the
+  /// data line. `null` means the user backed out.
+  Future<String?> _promptText({
+    required String title,
+    required String helper,
+    required String initial,
+    int maxLength = 32,
+    TextInputType keyboard = TextInputType.text,
+  }) async {
+    final controller = TextEditingController(text: initial);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _kSurface,
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: maxLength,
+          keyboardType: keyboard,
+          decoration: InputDecoration(hintText: helper, helperText: helper),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(''), child: const Text('清空')),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
+  Future<void> _editEdgeText() async {
+    final value = await _promptText(
+      title: '边字',
+      helper: 'KODAK PORTRA 400 · 留空用胶卷自带的',
+      initial: _edgeText,
+      maxLength: 28,
+    );
+    if (value == null || !mounted) return;
+    setState(() => _edgeText = value);
+    await _applyFrame(label: '换边字…');
+  }
+
+  Future<void> _editFrameNumber() async {
+    final value = await _promptText(
+      title: '帧号',
+      helper: '1–99，留空由相机随机',
+      initial: _frameNumber < 0 ? '' : _frameNumber.toString(),
+      maxLength: 2,
+      keyboard: TextInputType.number,
+    );
+    if (value == null || !mounted) return;
+    final parsed = int.tryParse(value);
+    setState(() => _frameNumber = parsed == null ? -1 : parsed.clamp(0, 99));
+    await _applyFrame(label: '改帧号…');
+  }
+
+  Future<void> _editDataText() async {
+    final value = await _promptText(
+      title: '数据行',
+      helper: 'ISO 400 1/125 f5.6 · 留空不打印',
+      initial: _dataText,
+      maxLength: 28,
+    );
+    if (value == null || !mounted) return;
+    setState(() => _dataText = value);
+    await _applyFrame(label: '改数据行…');
+  }
+
   Future<void> _deleteCached(CachedRaw entry) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -601,6 +741,7 @@ class _EditorPageState extends State<EditorPage> {
         _panelExpanded = true;
         _busyLabel = '渲染中…';
       });
+      await _syncBudget();
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
       unawaited(_ensureSource());
@@ -647,6 +788,7 @@ class _EditorPageState extends State<EditorPage> {
         // There is something to edit now, so open the sheet for it.
         _panelExpanded = true;
       });
+      await _syncBudget();
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
     } catch (error) {
@@ -807,9 +949,19 @@ class _EditorPageState extends State<EditorPage> {
     if (!_hasSession || _busy) return;
     setState(() => _busy = true);
     try {
-      await _worker!.setParams({..._liveDelta(), ..._slowDelta()});
+      // The `preview` tier is a fixed 3400 px long edge, which a rebate canvas
+      // on a 120 format does not fit. The `live` tier takes its size from
+      // `preview_long_edge`, so a capped fine frame asks for fewer pixels
+      // through that tier instead of failing at 3400.
+      final edge = _overscanEdge(_fineEdge);
+      final tier = edge < _fineEdge ? 'live' : 'preview';
+      await _worker!.setParams({
+        ..._liveDelta(),
+        ..._slowDelta(),
+        'preview_long_edge': edge,
+      });
       final stopwatch = Stopwatch()..start();
-      final frame = await _worker!.reprint(tier: 'preview');
+      final frame = await _worker!.reprint(tier: tier);
       stopwatch.stop();
       await _showFrame(frame, fast: false, wallMs: stopwatch.elapsedMilliseconds);
     } catch (error) {
@@ -899,14 +1051,25 @@ class _EditorPageState extends State<EditorPage> {
     ).then((_) => dialogOpen = false));
 
     try {
+      // A rebate is drawn on a canvas larger than the frame, and the `full`
+      // tier is the frame's own resolution with no way to ask for less — so on
+      // a big source the canvas blows the device's buffer. Render through the
+      // `live` tier at the largest edge that fits instead; it is the same
+      // pixels, just budgeted.
+      final fullEdge = math.min(math.max(_sourceWidth, _sourceHeight), 8192);
+      final cappedEdge = _overscanEdge(fullEdge);
+      final rebateCapped = _overscanOn && cappedEdge < fullEdge;
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
+        if (rebateCapped) 'preview_long_edge': cappedEdge,
         'film_stock': _film,
         'print_stock': _paper,
       });
-      stage.value = '渲染全尺寸…';
-      final frame = await _worker!.render(tier: 'full');
+      stage.value = rebateCapped ? '渲染片边（${cappedEdge}px）…' : '渲染全尺寸…';
+      final frame = rebateCapped
+          ? await _worker!.reprint(tier: 'live')
+          : await _worker!.render(tier: 'full');
       final megapixels = frame.width * frame.height / 1000000;
       // Blending needs the source frame as well, so the ceiling halves.
       final ceiling = _strength < 0.999 ? _maxFullExportMp / 2 : _maxFullExportMp;
@@ -2431,6 +2594,18 @@ class _EditorPageState extends State<EditorPage> {
         },
       ),
       if (format != null && _overscanOn) ...[
+        if (_maxPlanePixels > 0 && _overscanEdge(_fineEdge) < _fineEdge)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+            child: Text(
+              '片边受显存限制：本机缓冲上限 ${planeBudgetMegapixels(_maxPlanePixels).toStringAsFixed(1)} MP，'
+              '预览与导出改用长边 ≤ ${_overscanEdge(_fineEdge)} px',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 10.5,
+                color: _kTextDim,
+              ),
+            ),
+          ),
         _choiceRow(
           theme,
           '齿孔',
@@ -2445,6 +2620,30 @@ class _EditorPageState extends State<EditorPage> {
         ),
         _choiceRow(
           theme,
+          '排布',
+          const ['strip', 'filed'],
+          const ['条状', '单张'],
+          _overscanMode,
+          enabled,
+          (value) {
+            setState(() => _overscanMode = value);
+            _applyFrame(label: '换排布…');
+          },
+        ),
+        _choiceRow(
+          theme,
+          '片门形',
+          const ['auto', 'square', 'rounded', 'eared', 'shouldered', 'kicked'],
+          const ['自动', '方形', '圆角', '带耳', '带肩', '踢角'],
+          _gate,
+          enabled,
+          (value) {
+            setState(() => _gate = value);
+            _applyFrame(label: '换片门…');
+          },
+        ),
+        _choiceRow(
+          theme,
           '片基外',
           const ['none', 'black', 'open'],
           const ['无', '黑场', '透光'],
@@ -2455,6 +2654,44 @@ class _EditorPageState extends State<EditorPage> {
             _applyFrame(label: '换片基…');
           },
         ),
+        _tapRow(
+          theme,
+          '边字',
+          _edgeText.isEmpty ? '胶卷自带' : _edgeText,
+          enabled,
+          () => _editEdgeText(),
+        ),
+        _tapRow(
+          theme,
+          '帧号',
+          _frameNumber < 0 ? '自动' : _frameNumber.toString(),
+          enabled,
+          () => _editFrameNumber(),
+        ),
+        _choiceRow(
+          theme,
+          '光圈',
+          const ['0', '2.8', '4', '5.6', '8', '11', '16'],
+          const ['未知', 'f2.8', 'f4', 'f5.6', 'f8', 'f11', 'f16'],
+          _fNumber == 0 ? '0' : _fNumber.toString(),
+          enabled,
+          (value) {
+            setState(() => _fNumber = double.parse(value));
+            _applyFrame(label: '改光圈…');
+          },
+        ),
+        if (format.id == '135_half')
+          _switchRow(
+            theme,
+            '半格成对',
+            subtitle: '一格放两张半格，中间留片边',
+            value: _pair,
+            enabled: enabled,
+            onChanged: (value) {
+              setState(() => _pair = value);
+              _applyFrame(label: value ? '拼第二格…' : '收第二格…');
+            },
+          ),
         _sliderRow(
           theme,
           label: '边雾',
@@ -2521,6 +2758,37 @@ class _EditorPageState extends State<EditorPage> {
             setState(() => _datePlacement = value);
             _applyFrame(label: '挪日期…');
           },
+        ),
+        if (_datePlacement == 'frame')
+          _choiceRow(
+            theme,
+            '角落',
+            const ['br', 'bl', 'tr', 'tl'],
+            const ['右下', '左下', '右上', '左上'],
+            _dateCorner,
+            enabled,
+            (value) {
+              setState(() => _dateCorner = value);
+              _applyFrame(label: '挪日期…');
+            },
+          ),
+        _sliderRow(
+          theme,
+          label: '字号',
+          valueLabel: _dateSize.toStringAsFixed(1),
+          value: _dateSize,
+          min: 0.4,
+          max: 3,
+          enabled: enabled,
+          onChanged: (value) => setState(() => _dateSize = value),
+          onChangeEnd: (_) => _applyFrame(label: '改字号…'),
+        ),
+        _tapRow(
+          theme,
+          '数据行',
+          _dataText.isEmpty ? '不打印' : _dataText,
+          enabled,
+          () => _editDataText(),
         ),
       ],
     ];
@@ -2733,7 +3001,7 @@ class _EditorPageState extends State<EditorPage> {
           children: [
             _qualityPill(theme, PreviewQuality.fast, '实时 · 1600'),
             const SizedBox(width: 6),
-            _qualityPill(theme, PreviewQuality.fine, '精细 · 3400'),
+            _qualityPill(theme, PreviewQuality.fine, '精细 · ${_overscanEdge(_fineEdge)}'),
             const Spacer(),
           ],
         ),

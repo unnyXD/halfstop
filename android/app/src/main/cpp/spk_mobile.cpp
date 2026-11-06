@@ -353,6 +353,25 @@ int32_t spk_mobile_engine_capabilities(spk_engine* engine, char** out_json) {
     return SPK_OK;
 }
 
+// The largest frame the device can bind, in pixels.
+//
+// `spk_max_plane_bytes` is the device's own limit and the source is already
+// downscaled to it at open. The overscan canvas is a *second* allocation at
+// 12 B/px and is bigger than the frame (the rebate and the film's width are
+// laid around it), so a frame that fits can still produce a canvas that does
+// not -- `spk_overscan_add_mask` then fails with "buffer argument 3 needs
+// 181.9 MiB, this device allows 128.0 MiB". Exposing the budget lets the UI
+// pick a tier size that the canvas fits inside, instead of discovering it by
+// failing.
+uint64_t spk_mobile_max_plane_pixels(spk_engine* engine) {
+    if (engine == nullptr) return 0;
+    const uint64_t bytes = spk_max_plane_bytes(engine);
+    if (bytes == 0) return 0;
+    // The same 5% headroom `fit_to_max_plane` keeps for row padding and the
+    // intermediates the pipeline holds beside the plane.
+    return static_cast<uint64_t>(static_cast<double>(bytes) * 0.95 / 12.0);
+}
+
 // Opens a RAW on an existing engine. This is the editor's entry point: the
 // engine stays alive for the whole session, so `spk_set_params` + `spk_reprint`
 // can turn a slider into a new frame instead of a full engine restart.
