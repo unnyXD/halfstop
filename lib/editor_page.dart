@@ -240,6 +240,14 @@ class _EditorPageState extends State<EditorPage> {
     return id;
   }
 
+  /// What the rebate says when the user has not written anything.
+  ///
+  /// The engine prints no stock name of its own: `overscan_edge_text` *is* the
+  /// name on the edge ("the host's text", `overscan.cpp`), so an empty field
+  /// leaves a blank rebate rather than the film's own print. The app fills in
+  /// the film's name, which is what a real strip carries.
+  String get _defaultEdgeText => _stockName(_film).toUpperCase();
+
   bool get _hasSession =>
       _sessionOpen && _worker != null && _resourcesDir != null;
 
@@ -373,16 +381,20 @@ class _EditorPageState extends State<EditorPage> {
       'overscan_gate': _gate,
       'overscan_fog': _edgeFog,
       'overscan_leaks': _leaks,
-      if (_edgeText.isNotEmpty) 'overscan_edge_text': _edgeText,
-      if (_frameNumber >= 0) 'overscan_frame_number': _frameNumber,
-      if (_fNumber > 0) 'overscan_f_number': _fNumber,
+      // Always sent, empty included: the engine keeps whatever it was last
+      // told, so omitting the field on "clear" leaves the old text printed.
+      // An empty edge text is what makes it draw the stock's own rebate.
+      'overscan_edge_text': _edgeText.isEmpty ? _defaultEdgeText : _edgeText,
+      // 0 is the engine's "no frame number, draw one": -1 is the UI's.
+      'overscan_frame_number': _frameNumber < 0 ? 0 : _frameNumber,
+      'overscan_f_number': _fNumber,
       'overscan_pair': _pair && _format?.id == '135_half',
       'date_imprint_active': _dateOn,
       if (_dateOn) 'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
       if (_dateOn) 'date_imprint_style': _dateStyle,
       if (_dateOn) 'date_imprint_corner': _dateCorner,
       if (_dateOn) 'date_imprint_size': _dateSize,
-      if (_dateOn && _dataText.isNotEmpty) 'date_imprint_data_text': _dataText,
+      if (_dateOn) 'date_imprint_data_text': _dataText,
       // The rebate only exists when the rebate is drawn.
       if (_dateOn)
         'date_imprint_placement':
@@ -623,7 +635,7 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> _editEdgeText() async {
     final value = await _promptText(
       title: '边字',
-      helper: 'KODAK PORTRA 400 · 留空用胶卷自带的',
+      helper: '留空用胶卷名（$_defaultEdgeText）',
       initial: _edgeText,
       maxLength: 28,
     );
@@ -1008,6 +1020,8 @@ class _EditorPageState extends State<EditorPage> {
         ..._slowDelta(),
         'film_stock': _film,
         'print_stock': _paper,
+        // The rebate carries the stock's name, so it has to change with it.
+        if (_overscanOn) 'overscan_edge_text': _edgeText.isEmpty ? _defaultEdgeText : _edgeText,
       });
       final stopwatch = Stopwatch()..start();
       final frame = await _worker!.reprint(tier: 'live');
@@ -2657,7 +2671,7 @@ class _EditorPageState extends State<EditorPage> {
         _tapRow(
           theme,
           '边字',
-          _edgeText.isEmpty ? '胶卷自带' : _edgeText,
+          _edgeText.isEmpty ? '默认 · $_defaultEdgeText' : _edgeText,
           enabled,
           () => _editEdgeText(),
         ),
