@@ -2646,10 +2646,30 @@ class _EditorPageState extends State<EditorPage> {
       if (format != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Text(
-            '${format.note} · '
-            '裁剪保留 ${(crop.width * 100).round()}% × ${(crop.height * 100).round()}%',
-            style: theme.textTheme.labelSmall?.copyWith(color: _kTextDim),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // The gate in millimetres, the film it sits on, and the shape —
+              // "36 × 24" alone does not say which strip the frame came off.
+              Text(
+                '片门 ${_mm(format.longEdge)} × ${_mm(format.shortEdge)} mm'
+                ' · ${format.isThirtyFive ? '135' : '120'} 片基 ${format.filmWidth.toStringAsFixed(0)} mm'
+                ' · ${format.ratio.toStringAsFixed(2)} : 1',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 10.5,
+                  color: _kTextDim,
+                  height: 1.5,
+                ),
+              ),
+              Text(
+                '${format.note} · 保留 ${(crop.width * 100).round()}% × ${(crop.height * 100).round()}%',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  color: _kTextDim.withValues(alpha: 0.75),
+                  height: 1.5,
+                ),
+              ),
+            ],
           ),
         ),
       const SizedBox(height: 6),
@@ -2949,6 +2969,13 @@ class _EditorPageState extends State<EditorPage> {
         color: _kTextDim.withValues(alpha: 0.7),
       ),
     );
+  }
+
+  /// Millimetres without trailing zeros: 36.25 stays precise, 24 does not
+  /// become "24.0".
+  static String _mm(double value) {
+    final text = value.toStringAsFixed(2);
+    return text.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
   Widget _formatChip(ThemeData theme, FilmFormat? format, String label, bool enabled) {
