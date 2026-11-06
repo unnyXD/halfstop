@@ -540,6 +540,12 @@ class _EditorPageState extends State<EditorPage> {
         'geometry_crop_y': 0.0,
         'geometry_crop_w': 1.0,
         'geometry_crop_h': 1.0,
+        // The whole frame is only the gate's shape by accident, and the
+        // engine refuses to lay a rebate around a frame that is not the gate
+        // ("a 1199 x 1600 frame is not the 135 gate's shape"). Rebate and date
+        // come back with `_applyFrame` when the crop is confirmed.
+        'overscan_active': false,
+        'date_imprint_active': false,
         'film_stock': _film,
         'print_stock': _paper,
       });
