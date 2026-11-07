@@ -17,6 +17,7 @@ import 'render_budget.dart';
 import 'histogram.dart';
 import 'layer2.dart';
 import 'photo_settings.dart';
+import 'presets.dart';
 import 'photo_import.dart';
 import 'stock_catalog.dart';
 
@@ -210,6 +211,9 @@ class _EditorPageState extends State<EditorPage> {
   /// What each picture was last left at, keyed by file.
   PhotoSettingsStore? _photoSettings;
 
+  /// Named looks, for shoots that use one setup for all of it.
+  PresetStore? _presets;
+
   /// A crop recalled from a file, held back until the source size is known:
   /// it is only the right shape on a picture of the same size.
   CropRect? _pendingCrop;
@@ -244,12 +248,14 @@ class _EditorPageState extends State<EditorPage> {
       final films = stocks.where((stock) => stock.isFilm).toList();
       final papers = stocks.where((stock) => stock.isPrintStock).toList();
       final settings = await PhotoSettingsStore.open();
+      final presets = await PresetStore.open();
       if (!mounted) {
         await worker.close();
         return;
       }
       setState(() {
         _photoSettings = settings;
+        _presets = presets;
         _worker = worker;
         _resourcesDir = resourcesDir;
         _stocks = stocks;
@@ -592,6 +598,219 @@ class _EditorPageState extends State<EditorPage> {
     } finally {
       if (!quiet && mounted) setState(() => _busy = false);
     }
+  }
+
+  Widget _presetButton(ThemeData theme) {
+    return GestureDetector(
+      onTap: _busy ? null : _showPresets,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+        decoration: BoxDecoration(
+          color: _kSurfaceHigh,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _kLine),
+        ),
+        child: Text(
+          '预设',
+          style: theme.textTheme.labelMedium?.copyWith(
+            fontSize: 11,
+            letterSpacing: 0.6,
+            color: _kTextDim,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A one-line description of what a preset will do to the picture.
+  String _presetSummary(Preset preset) {
+    final settings = preset.settings;
+    final parts = <String>[_stockName(settings.film)];
+    String gate = '原图';
+    for (final format in kFilmFormats) {
+      if (format.id == settings.formatId) {
+        gate = format.label;
+        break;
+      }
+    }
+    parts.add(gate);
+    if (settings.overscanOn) parts.add('片边');
+    if (settings.dateOn) parts.add('日期');
+    return parts.join(' · ');
+  }
+
+  Future<void> _showPresets() async {
+    final store = _presets;
+    if (store == null) return;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _kSurface,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final presets = store.all;
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.6,
+              ),
+              child: SafeArea(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 24),
+                  children: [
+                    ListTile(
+                      leading: const Icon(
+                        Icons.add_circle_outline,
+                        size: 20,
+                        color: _kAccent,
+                      ),
+                      title: Text(
+                        '保存当前为预设',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 13,
+                          color: _kAccent,
+                        ),
+                      ),
+                      onTap: () => Navigator.of(context).pop('__save__'),
+                    ),
+                    if (presets.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                        child: Text(
+                          '还没有预设。调好一张之后存下来，下一张直接套。',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 10.5,
+                            height: 1.5,
+                            color: _kTextDim,
+                          ),
+                        ),
+                      ),
+                    for (final preset in presets)
+                      ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.only(left: 20, right: 8),
+                        title: Text(
+                          preset.name,
+                          style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          _presetSummary(preset),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 10,
+                            color: _kTextDim,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 16),
+                          color: _kTextDim,
+                          onPressed: () {
+                            store.remove(preset.name);
+                            setSheetState(() {});
+                          },
+                        ),
+                        onTap: () => Navigator.of(context).pop(preset.name),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (!mounted || picked == null) return;
+    if (picked == '__save__') {
+      await _savePreset();
+      return;
+    }
+    for (final preset in store.all) {
+      if (preset.name == picked) {
+        await _applyPreset(preset);
+        return;
+      }
+    }
+  }
+
+  Future<void> _savePreset() async {
+    final store = _presets;
+    if (store == null) return;
+    var gate = '';
+    for (final format in kFilmFormats) {
+      if (format.id == _format?.id) {
+        gate = ' ${format.label}';
+        break;
+      }
+    }
+    final name = await _promptName('存为预设', '${_stockName(_film)}$gate');
+    if (name == null || !mounted) return;
+    store.save(
+      Preset(name: name, settings: _currentSettings(), savedAt: DateTime.now()),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已保存「$name」'), duration: const Duration(seconds: 2)),
+      );
+    }
+  }
+
+  /// Puts a preset on the open picture: every parameter in one round trip,
+  /// then a single reprint.
+  Future<void> _applyPreset(Preset preset) async {
+    _pushUndo();
+    _applySettings(preset.settings);
+    if (!_hasSession) return;
+    setState(() => _busy = true);
+    try {
+      await _worker!.setParams({
+        ..._liveDelta(),
+        ..._slowDelta(),
+        ..._frameDelta(),
+        'film_stock': _film,
+        'print_stock': _paper,
+      });
+      // A latitude curve is solved, not sent: re-fit it for this picture.
+      if (_highlightPull > 0 || _shadowPull > 0) {
+        await _applyLatitude(quiet: true, render: false);
+      }
+      final frame = await _worker!.reprint(tier: 'live');
+      await _showFrame(frame, fast: true, wallMs: null);
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptName(String title, String initial) async {
+    final controller = TextEditingController(text: initial);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _kSurface,
+        title: Text(title, style: const TextStyle(fontSize: 15)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(fontSize: 14),
+          decoration: const InputDecoration(hintText: '例如：外景 · Portra 400'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return (result == null || result.isEmpty) ? null : result;
   }
 
   /// Back to the picker without restarting: the engine keeps its resources,
@@ -2832,7 +3051,8 @@ class _EditorPageState extends State<EditorPage> {
         children: [
           ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            // Room on the right for the preset button, which rides on top.
+            padding: const EdgeInsets.only(left: 6, right: 66),
             children: [
               for (final entry in labels.entries)
                 _tab(theme, entry.key, entry.value),
@@ -2843,6 +3063,12 @@ class _EditorPageState extends State<EditorPage> {
             right: 0,
             bottom: 0,
             child: Divider(height: 1, thickness: 1, color: _kLine),
+          ),
+          Positioned(
+            right: 6,
+            top: 0,
+            bottom: 1,
+            child: Center(child: _presetButton(theme)),
           ),
         ],
       ),
