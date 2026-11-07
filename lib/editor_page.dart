@@ -16,6 +16,7 @@ import 'frame_format.dart';
 import 'render_budget.dart';
 import 'histogram.dart';
 import 'layer2.dart';
+import 'photo_settings.dart';
 import 'photo_import.dart';
 import 'stock_catalog.dart';
 
@@ -200,6 +201,15 @@ class _EditorPageState extends State<EditorPage> {
   /// The shooting data printed beside the date (1.3.1): ISO, shutter, aperture.
   String _dataText = '';
 
+  /// What each picture was last left at, keyed by file.
+  PhotoSettingsStore? _photoSettings;
+
+  /// A crop recalled from a file, held back until the source size is known:
+  /// it is only the right shape on a picture of the same size.
+  CropRect? _pendingCrop;
+  int? _pendingCropWidth;
+  int? _pendingCropHeight;
+
   @override
   void initState() {
     super.initState();
@@ -227,7 +237,13 @@ class _EditorPageState extends State<EditorPage> {
       }
       final films = stocks.where((stock) => stock.isFilm).toList();
       final papers = stocks.where((stock) => stock.isPrintStock).toList();
+      final settings = await PhotoSettingsStore.open();
+      if (!mounted) {
+        await worker.close();
+        return;
+      }
       setState(() {
+        _photoSettings = settings;
         _worker = worker;
         _resourcesDir = resourcesDir;
         _stocks = stocks;
@@ -518,6 +534,8 @@ class _EditorPageState extends State<EditorPage> {
   /// Back to the picker without restarting: the engine keeps its resources,
   /// only the session's picture goes away.
   void _closeImage() {
+    // Going back is the last chance to file this picture's settings.
+    _rememberSettings();
     final image = _image;
     final source = _sourceImage;
     setState(() {
@@ -795,6 +813,7 @@ class _EditorPageState extends State<EditorPage> {
       _cached = cached;
       if (_path == entry.path) _path = null;
     });
+    _photoSettings?.forget(entry.path);
     unawaited(_ensureThumbnails());
   }
 
@@ -834,6 +853,128 @@ class _EditorPageState extends State<EditorPage> {
     if (mounted) setState(() => _cached = cached);
   }
 
+  /// Everything the panel is set to, ready to be filed under the open
+  /// picture.
+  PhotoSettings _currentSettings() {
+    final crop = _crop;
+    return PhotoSettings(
+      film: _film,
+      paper: _paper,
+      exposureEv: _exposureEv,
+      magenta: _magenta,
+      yellow: _yellow,
+      shiftScale: _shiftScale,
+      preflash: _preflash,
+      strength: _strength,
+      grain: _grain,
+      halation: _halation,
+      glare: _glare,
+      scatter: _scatter,
+      noAntihalation: _noAntihalation,
+      cameraFilter: _cameraFilter,
+      layer2: _layer2,
+      formatId: _format?.id,
+      crop: crop == null
+          ? null
+          : CropRect(
+              x: crop.x,
+              y: crop.y,
+              width: crop.width,
+              height: crop.height,
+            ),
+      cropOnWidth: crop == null ? null : _sourceWidth,
+      cropOnHeight: crop == null ? null : _sourceHeight,
+      overscanOn: _overscanOn,
+      overscanMode: _overscanMode,
+      holes: _holes,
+      carrier: _carrier,
+      gate: _gate,
+      edgeText: _edgeText,
+      edgeFog: _edgeFog,
+      leaks: _leaks,
+      frameNumber: _frameNumber,
+      fNumber: _fNumber,
+      pair: _pair,
+      dateOn: _dateOn,
+      dateText: _dateText,
+      dateStyle: _dateStyle,
+      datePlacement: _datePlacement,
+      dateCorner: _dateCorner,
+      dateSize: _dateSize,
+      dataText: _dataText,
+    );
+  }
+
+  /// Files the open picture's settings before another takes its place.
+  void _rememberSettings() {
+    final path = _path;
+    final store = _photoSettings;
+    if (path == null || store == null) return;
+    store.put(path, _currentSettings());
+  }
+
+  /// Puts the panel back the way this picture was left.
+  ///
+  /// A picture with no file starts from the defaults instead of inheriting
+  /// whatever the last one was set to — that inheritance is exactly what made
+  /// a 6×6 shot open with a 135 rebate on it.
+  void _recallSettings(String path) {
+    final store = _photoSettings;
+    if (store == null) return;
+    _applySettings(store[path] ?? const PhotoSettings());
+  }
+
+  void _applySettings(PhotoSettings s) {
+    FilmFormat? format;
+    for (final candidate in kFilmFormats) {
+      if (candidate.id == s.formatId) {
+        format = candidate;
+        break;
+      }
+    }
+    // The crop waits until the engine says how big this picture is.
+    _pendingCrop = s.crop;
+    _pendingCropWidth = s.cropOnWidth;
+    _pendingCropHeight = s.cropOnHeight;
+    setState(() {
+      _film = s.film;
+      _paper = s.paper;
+      _exposureEv = s.exposureEv;
+      _magenta = s.magenta;
+      _yellow = s.yellow;
+      _shiftScale = s.shiftScale;
+      _preflash = s.preflash;
+      _strength = s.strength;
+      _grain = s.grain;
+      _halation = s.halation;
+      _glare = s.glare;
+      _scatter = s.scatter;
+      _noAntihalation = s.noAntihalation;
+      _cameraFilter = s.cameraFilter;
+      _layer2 = s.layer2;
+      _format = format;
+      _crop = null;
+      _overscanOn = s.overscanOn;
+      _overscanMode = s.overscanMode;
+      _holes = s.holes;
+      _carrier = s.carrier;
+      _gate = s.gate;
+      _edgeText = s.edgeText;
+      _edgeFog = s.edgeFog;
+      _leaks = s.leaks;
+      _frameNumber = s.frameNumber;
+      _fNumber = s.fNumber;
+      _pair = s.pair;
+      _dateOn = s.dateOn;
+      _dateText = s.dateText;
+      _dateStyle = s.dateStyle;
+      _datePlacement = s.datePlacement;
+      _dateCorner = s.dateCorner;
+      _dateSize = s.dateSize;
+      _dataText = s.dataText;
+    });
+  }
+
   void _openCached(CachedRaw entry) {
     if (entry.isPhoto) {
       _openPhoto(entry.path);
@@ -848,6 +989,10 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> _openPhoto(String path) async {
     if (_worker == null || _resourcesDir == null) return;
     _debounce?.cancel();
+    // File what the open picture was set to, then put the panel back the way
+    // this one was left.
+    _rememberSettings();
+    _recallSettings(path);
     setState(() {
       _busy = true;
       _busyLabel = '解码图片…';
@@ -871,6 +1016,8 @@ class _EditorPageState extends State<EditorPage> {
           'print_stock': _paper,
           ..._liveDelta(),
           ..._slowDelta(),
+          // No crop here: it is computed from the source size, which this call
+          // is what tells us. `_frameDelta` goes out right after the open.
         },
       );
       // ~144 MB of float32 at 12 MP; the engine has its own copy now.
@@ -885,6 +1032,23 @@ class _EditorPageState extends State<EditorPage> {
         _busyLabel = '渲染中…';
       });
       await _syncBudget();
+      // The recalled crop only holds on a picture of the size it was drawn on.
+      final pending = _pendingCrop;
+      _pendingCrop = null;
+      if (pending != null) {
+        final sameShape = (_pendingCropWidth == null ||
+                _pendingCropWidth == _sourceWidth) &&
+            (_pendingCropHeight == null || _pendingCropHeight == _sourceHeight);
+        _pendingCropWidth = null;
+        _pendingCropHeight = null;
+        if (sameShape) {
+          setState(() => _crop =
+              CropBox(pending.x, pending.y, pending.width, pending.height));
+        }
+      }
+      // Now that the source size is known, the format, rebate and date can be
+      // sent: their crop has to be computed against *this* picture.
+      await _worker!.setParams({..._frameDelta()});
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
       unawaited(_ensureSource());
@@ -903,6 +1067,10 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> _openPath(String path) async {
     if (_worker == null || _resourcesDir == null) return;
     _debounce?.cancel();
+    // File what the open picture was set to, then put the panel back the way
+    // this one was left.
+    _rememberSettings();
+    _recallSettings(path);
     setState(() {
       _busy = true;
       _busyLabel = '解码 RAW…';
@@ -921,6 +1089,8 @@ class _EditorPageState extends State<EditorPage> {
           'print_stock': _paper,
           ..._liveDelta(),
           ..._slowDelta(),
+          // No crop here: it is computed from the source size, which this call
+          // is what tells us. `_frameDelta` goes out right after the open.
         },
       );
       if (!mounted) return;
@@ -932,6 +1102,23 @@ class _EditorPageState extends State<EditorPage> {
         _panelExpanded = true;
       });
       await _syncBudget();
+      // The recalled crop only holds on a picture of the size it was drawn on.
+      final pending = _pendingCrop;
+      _pendingCrop = null;
+      if (pending != null) {
+        final sameShape = (_pendingCropWidth == null ||
+                _pendingCropWidth == _sourceWidth) &&
+            (_pendingCropHeight == null || _pendingCropHeight == _sourceHeight);
+        _pendingCropWidth = null;
+        _pendingCropHeight = null;
+        if (sameShape) {
+          setState(() => _crop =
+              CropBox(pending.x, pending.y, pending.width, pending.height));
+        }
+      }
+      // Now that the source size is known, the format, rebate and date can be
+      // sent: their crop has to be computed against *this* picture.
+      await _worker!.setParams({..._frameDelta()});
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
     } catch (error) {
