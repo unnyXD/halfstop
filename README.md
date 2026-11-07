@@ -1,10 +1,17 @@
 # 半档 / Halfstop
 
-Android 上的胶片模拟应用。光谱计算和渲染都在手机 GPU 上跑，不联服务器，也不是套滤镜——胶片、相纸、放大机这一整套流程是算出来的。
+Android 上的胶片模拟应用。光谱计算和渲染都在手机 GPU 上跑，不联服务器，也不是套滤镜——胶片、相纸、放大机这一整套是算出来的。
 
 | 编辑器 | 画幅、片边与日期后背 |
 |---|---|
 | ![编辑器](docs/screenshot-editor.png) | ![画幅](docs/screenshot-frame.png) |
+| Portra 400，测光给出 +0.25 EV | 6×6 与片边，边字按胶卷自带的版式 |
+
+## 怎么用
+
+挑一张照片，选胶片和相纸，划几下就出片。要用画幅就套一个，想更真实就开片边、打日期，最后导出 JPEG，拍摄参数跟着一起写进去。
+
+调好一套之后存成预设，同一天剩下的照片直接套，不用每张重来。
 
 ## 功能
 
@@ -12,6 +19,7 @@ Android 上的胶片模拟应用。光谱计算和渲染都在手机 GPU 上跑�
 
 - 34 个 profile：25 款拍摄胶片、7 款相纸、2 款电影拷贝片
 - 数据来自光谱实测，不是风格化的 LUT
+- 彩色负片之外，黑白片也在：Ilford HP5 Plus、Kodak Tri-X 与 T-Max、Fujifilm Acros II
 - 相纸决定纸基色调与反差，拷贝片走先翻底再印片的路子
 - 模拟强度可调，导出的 JPEG 按同一比例烘进去
 
@@ -21,29 +29,35 @@ Android 上的胶片模拟应用。光谱计算和渲染都在手机 GPU 上跑�
 - 画幅框固定，双指缩放照片、单指拖动构图
 - 片边：上下齿孔、片基外、边雾、漏光，条状或单张排布
 - 五种片门形状，边字可改写，可打帧号和光圈
+- 半格画幅可以一格放两张
 - 日期后背：三种字面、四角位置、字号、数据行
 
 **调整**
 
 - 曝光、品红与黄滤色、滤色强度，拖动时约 100 ms 出帧
-- 亮度、对比、饱和、色温、色调
-- 测光与一键自动曝光
-- 场景宽容度：高光与暗部各自往纸的范围里收，也可按场景自动配
-- 直方图，可在面板里固定显示
+- 测光读数与一键自动曝光
+- 场景宽容度：高光与暗部各自往纸的范围里收，也可以按场景自动配
+- 调色五项：亮度、对比、饱和、色温、色调
+- 直方图，可固定在面板顶部
 - 撤销 20 步
-- 每张照片记住自己的胶片、画幅、片边与调色，换照片不会串
-- 预设：把一整套设置存下来，下一张直接套
-- 导出 JPEG，EXIF 带完整的拍摄参数
+- 每张照片记住自己的胶片、画幅、片边和调色，换照片不会串
+- 预设：一整套设置存一条，下一张直接套
 
-**导入**
+**导入与导出**
 
 - 相册图片：JPEG、PNG、WebP、BMP
 - RAW：ARW、DNG、CR2、CR3、NEF、RAF、ORF 等，走 LibRaw 解码
-- 首页列出最近导入；RAW 的缩略图用相机内嵌的预览，不用先解码
+- 首页列出最近导入，RAW 的缩略图用相机内嵌的预览，不用先解码
+- 导出 JPEG，EXIF 带完整的拍摄参数
+
+## 已知限制
+
+- 片边和日期要额外铺一块画布，本机显存够多少就算多大。超过上限时自动缩小长边，面板和导出结果里会写实际尺寸
+- 对比度蒙版引擎在 Vulkan 后端还没实现，界面上没有这个开关
 
 ## 安装
 
-从 [Releases](https://github.com/unnyXD/halfstop/releases) 下载 arm64 的 APK，Android 8.0 及以上。覆盖安装即可，导入缓存和设置都保留。
+从 [Releases](https://github.com/unnyXD/halfstop/releases) 下载 arm64 的 APK，Android 8.0 及以上。覆盖安装即可，导入缓存、预设和每张照片的设置都保留。
 
 ## 构建
 
@@ -68,9 +82,11 @@ adb install -r build\app\outputs\flutter-apk\app-release.apk
 
 ```
 ┌─ Flutter (Dart) ────────────────────────────────────────────┐
-│  lib/editor_page.dart   编辑器：预览、滑块、胶片与相纸      │
-│  lib/engine_worker.dart 常驻 isolate：engine + session      │
-│  lib/engine_bridge.dart 探针、一次性渲染、MethodChannel     │
+│  lib/editor_page.dart      编辑器：预览、滑块、胶片与相纸   │
+│  lib/photo_settings.dart   每张照片的设置，按文件存          │
+│  lib/presets.dart          具名的整套设置                    │
+│  lib/engine_worker.dart    常驻 isolate：engine + session   │
+│  lib/engine_bridge.dart    探针、一次性渲染、MethodChannel  │
 │         │                                                   │
 │         │  SendPort（命令 JSON / 像素 TransferableTypedData）│
 │         ▼                                                   │
@@ -85,6 +101,8 @@ adb install -r build\app\outputs\flutter-apk\app-release.apk
 引擎和 session 常驻在同一个 isolate，FFI 指针不跨 isolate；界面发 JSON 命令，像素用 `TransferableTypedData` 传回来，渲染不会堵住 UI。
 
 引擎的参数走 JSON、像素走 buffer，所以加一个滑块不用改 FFI 签名。引擎本身不写文件，只返回 RGBA16，编码交给 Dart。调色那几项在 Flutter 侧用颜色矩阵做，不进引擎，滑块才跟得上手指。
+
+场景宽容度是个例外：它不是一组能直接下发的参数，而是先让引擎按当前画面和相纸解算，再把算出来的曲线提交上去。
 
 ## 许可
 
