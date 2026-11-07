@@ -185,6 +185,17 @@ class EngineWorker {
     return _frame(await _call('exportSource', {'tier': tier}));
   }
 
+  /// Measures the scene against this paper and solves a latitude curve.
+  ///
+  /// Costs a measurement, not a render. The reply's `fit.params_delta` is what
+  /// [setParams] takes; `fit.valid` is false when the two ends cannot be
+  /// squeezed onto the medium without breaking the identity core.
+  Future<Map<String, dynamic>> sceneLatitude(
+      [Map<String, Object?> request = const {}]) async {
+    final result = await _call('sceneLatitude', {'request': request});
+    return (result as Map?)?.cast<String, dynamic>() ?? const {};
+  }
+
   /// Which papers ship a print LUT, keyed by stock: `paired_film`,
   /// `declared_pairing`, `lut_size`.
   Future<Map<String, dynamic>> printLutCatalog() async {
@@ -330,6 +341,10 @@ class _NativeSession {
             Pointer<Pointer<Utf8>>)>('spk_mobile_session_preview_stock_lut');
     _lutCatalog = library.lookupFunction<Pointer<Utf8> Function(Pointer<Void>),
         Pointer<Utf8> Function(Pointer<Void>)>('spk_mobile_print_lut_catalog');
+    _sceneLatitude = library.lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
+        int Function(Pointer<Void>, Pointer<Utf8>,
+            Pointer<Pointer<Utf8>>)>('spk_mobile_session_scene_latitude');
     _openRaw = library.lookupFunction<
         Pointer<Void> Function(
             Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
@@ -403,6 +418,7 @@ class _NativeSession {
   late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _previewStockLut;
   late final Pointer<Utf8> Function(Pointer<Void>) _lutCatalog;
+  late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _sceneLatitude;
   late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openRaw;
   late final Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
@@ -445,6 +461,8 @@ class _NativeSession {
         return _handleFrame(_reprint, args, fallbackTier: 'live', stage: 'reprint');
       case 'render':
         return _handleFrame(_render, args, fallbackTier: 'preview', stage: 'render');
+      case 'sceneLatitude':
+        return _handleSceneLatitude(args);
       case 'previewStockLut':
         return _handlePreviewStockLut(args);
       case 'printLutCatalog':
@@ -580,6 +598,27 @@ class _NativeSession {
       }
       return _decodeMap(reply);
     } finally {
+      malloc.free(replySlot);
+    }
+  }
+
+  Map<String, dynamic> _handleSceneLatitude(Map<String, Object?> args) {
+    if (_session == nullptr) {
+      throw EngineFailure('arguments', 'no RAW is open');
+    }
+    final request = (args['request'] as Map?)?.cast<String, Object?>() ?? const {};
+    final requestPtr = jsonEncode(request).toNativeUtf8();
+    final replySlot = malloc<Pointer<Utf8>>();
+    replySlot.value = nullptr;
+    try {
+      final status = _sceneLatitude(_session, requestPtr, replySlot);
+      final reply = _takeReply(replySlot);
+      if (status != 0) {
+        throw _failureFrom(reply, 'latitude');
+      }
+      return _decodeMap(reply);
+    } finally {
+      malloc.free(requestPtr);
       malloc.free(replySlot);
     }
   }

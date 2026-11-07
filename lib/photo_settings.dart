@@ -29,6 +29,8 @@ class PhotoSettings {
     this.scatter = 1,
     this.noAntihalation = false,
     this.cameraFilter = '',
+    this.latitudeHighlight = 0,
+    this.latitudeShadow = 0,
     this.layer2 = Layer2Params.neutral,
     this.formatId,
     this.crop,
@@ -70,6 +72,11 @@ class PhotoSettings {
   final double scatter;
   final bool noAntihalation;
   final String cameraFilter;
+
+  /// Stops pulled off each end of the scene, 0 = that side off. Only the
+  /// request is stored; the curve is re-fitted when the picture is reopened.
+  final double latitudeHighlight;
+  final double latitudeShadow;
   final Layer2Params layer2;
 
   /// `135`, `120_6x6`, … or null for "leave the frame alone".
@@ -119,6 +126,8 @@ class PhotoSettings {
         'scatter': scatter,
         'noAntihalation': noAntihalation,
         'cameraFilter': cameraFilter,
+        'latitudeHighlight': latitudeHighlight,
+        'latitudeShadow': latitudeShadow,
         'layer2': {
           'brightness': layer2.brightness,
           'contrast': layer2.contrast,
@@ -187,6 +196,8 @@ class PhotoSettings {
       scatter: d('scatter', 1),
       noAntihalation: b('noAntihalation', false),
       cameraFilter: s('cameraFilter', ''),
+      latitudeHighlight: d('latitudeHighlight', 0),
+      latitudeShadow: d('latitudeShadow', 0),
       layer2: Layer2Params(
         brightness: (layerMap['brightness'] as num?)?.toDouble() ?? 0,
         contrast: (layerMap['contrast'] as num?)?.toDouble() ?? 0,

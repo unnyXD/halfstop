@@ -952,6 +952,32 @@ int32_t spk_mobile_session_set_params(spk_mobile_session* handle, const char* de
     return static_cast<int32_t>(status);
 }
 
+// RFC-023's scene latitude: measure, suggest and solve — it never renders.
+// The reply's `fit.params_delta` is what the caller sends to
+// `spk_set_params`; the resolved knees and rooms never travel outward, so a
+// later paper change cannot re-solve an old edit.
+int32_t spk_mobile_session_scene_latitude(spk_mobile_session* handle, const char* request_json,
+                                          char** out_json) {
+    if (out_json != nullptr) *out_json = nullptr;
+    if (handle == nullptr || handle->session == nullptr) {
+        fail_reply(out_json, "arguments", "session is null");
+        return SPK_ERR_INVALID_ARG;
+    }
+    char* reply = nullptr;
+    const spk_status status = spk_scene_latitude(handle->session, request_json, &reply);
+    if (status == SPK_OK) {
+        if (out_json != nullptr) {
+            *out_json = reply;
+        } else if (reply != nullptr) {
+            spk_string_free(reply);
+        }
+    } else {
+        if (reply != nullptr) spk_string_free(reply);
+        fail_reply(out_json, "latitude", spk_last_error(handle->engine));
+    }
+    return static_cast<int32_t>(status);
+}
+
 int32_t spk_mobile_session_solve(spk_mobile_session* handle, const char* target,
                                  char** out_json) {
     if (out_json != nullptr) *out_json = nullptr;

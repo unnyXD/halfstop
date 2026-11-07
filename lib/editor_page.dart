@@ -119,6 +119,12 @@ class _EditorPageState extends State<EditorPage> {
   /// changes black-and-white stocks — colour emulsions carry their own dyes.
   String _cameraFilter = '';
 
+  /// How far each end of the scene is pulled back onto what the paper can
+  /// hold, in stops. 0 turns that side off. The engine solves these into
+  /// knees and rooms; only the pull-backs come back out.
+  double _highlightPull = 0;
+  double _shadowPull = 0;
+
   /// Undo stack of edit states. Snapshots are pushed at the start of a gesture,
   /// not per frame, so one slider drag is one undo step.
   static const int _maxUndo = 20;
@@ -531,6 +537,63 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  /// Fits the scene onto the paper's range.
+  ///
+  /// The engine measures the scene, solves two pull-backs into a curve and
+  /// hands back `fit.params_delta`, which is what the session takes. Nothing
+  /// here renders — [render] is what decides whether to repaint.
+  Future<void> _applyLatitude({
+    bool suggest = false,
+    bool quiet = false,
+    bool render = true,
+  }) async {
+    final worker = _worker;
+    if (worker == null || !_hasSession) return;
+    if (!quiet) setState(() => _busy = true);
+    try {
+      if (!suggest && _highlightPull <= 0 && _shadowPull <= 0) {
+        await worker.setParams({'scene_latitude_active': false});
+        if (!render) return;
+        final frame = await worker.reprint(tier: 'live');
+        await _showFrame(frame, fast: true, wallMs: null);
+        return;
+      }
+      final result = await worker.sceneLatitude({
+        if (!suggest && _highlightPull > 0) 'highlight_pull_back': _highlightPull,
+        if (!suggest && _shadowPull > 0) 'shadow_pull_back': _shadowPull,
+      });
+      if (suggest) {
+        // The engine's own reading of what this scene needs.
+        final suggested = result['suggested'];
+        if (suggested is Map) {
+          setState(() {
+            _highlightPull =
+                (suggested['highlight_pull_back'] as num?)?.toDouble() ?? 0;
+            _shadowPull =
+                (suggested['shadow_pull_back'] as num?)?.toDouble() ?? 0;
+          });
+        }
+      }
+      final fit = result['fit'];
+      final delta = fit is Map ? fit['params_delta'] : null;
+      if (delta is Map) {
+        await worker.setParams(delta.cast<String, Object?>());
+      } else if (!suggest) {
+        // A refused fit has issues rather than a curve; say so and leave the
+        // last one in place.
+        _setError('这个场景和这套搭配放不下：把两端的回收调小一点');
+        return;
+      }
+      if (!render) return;
+      final frame = await worker.reprint(tier: 'live');
+      await _showFrame(frame, fast: true, wallMs: null);
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (!quiet && mounted) setState(() => _busy = false);
+    }
+  }
+
   /// Back to the picker without restarting: the engine keeps its resources,
   /// only the session's picture goes away.
   void _closeImage() {
@@ -872,6 +935,8 @@ class _EditorPageState extends State<EditorPage> {
       scatter: _scatter,
       noAntihalation: _noAntihalation,
       cameraFilter: _cameraFilter,
+      latitudeHighlight: _highlightPull,
+      latitudeShadow: _shadowPull,
       layer2: _layer2,
       formatId: _format?.id,
       crop: crop == null
@@ -951,6 +1016,8 @@ class _EditorPageState extends State<EditorPage> {
       _scatter = s.scatter;
       _noAntihalation = s.noAntihalation;
       _cameraFilter = s.cameraFilter;
+      _highlightPull = s.latitudeHighlight;
+      _shadowPull = s.latitudeShadow;
       _layer2 = s.layer2;
       _format = format;
       _crop = null;
@@ -1046,6 +1113,11 @@ class _EditorPageState extends State<EditorPage> {
               CropBox(pending.x, pending.y, pending.width, pending.height));
         }
       }
+      // A stored pull-back is only a request; the curve has to be re-fitted
+      // against this picture before the first render.
+      if (_highlightPull > 0 || _shadowPull > 0) {
+        await _applyLatitude(quiet: true, render: false);
+      }
       // Now that the source size is known, the format, rebate and date can be
       // sent: their crop has to be computed against *this* picture.
       await _worker!.setParams({..._frameDelta()});
@@ -1115,6 +1187,11 @@ class _EditorPageState extends State<EditorPage> {
           setState(() => _crop =
               CropBox(pending.x, pending.y, pending.width, pending.height));
         }
+      }
+      // A stored pull-back is only a request; the curve has to be re-fitted
+      // against this picture before the first render.
+      if (_highlightPull > 0 || _shadowPull > 0) {
+        await _applyLatitude(quiet: true, render: false);
       }
       // Now that the source size is known, the format, rebate and date can be
       // sent: their crop has to be computed against *this* picture.
@@ -3670,11 +3747,85 @@ class _EditorPageState extends State<EditorPage> {
       // Pre-flash is intentionally not exposed: `preflash_exposure` is a
       // fraction of the film base density, and 1.0 crushes the print to black.
       // The only visible effect in a usable range duplicates exposure.
+      ..._latitudeRows(theme, canRender),
     ];
   }
 
   /// Grain, halation and glare — the surface of the print. These are the slow
   /// ones: they re-develop the negative rather than just reprint it.
+  /// Scene latitude: the two ends of the scene, pulled onto what this paper
+  /// can hold, with a neutral core left exactly alone.
+  List<Widget> _latitudeRows(ThemeData theme, bool canRender) {
+    final active = _highlightPull > 0 || _shadowPull > 0;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 2),
+        child: Row(
+          children: [
+            Text(
+              '场景宽容度',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontSize: 11,
+                letterSpacing: 1.2,
+                color: _kTextDim,
+              ),
+            ),
+            const Spacer(),
+            if (canRender && !_busy)
+              GestureDetector(
+                onTap: () => _applyLatitude(suggest: true),
+                child: Text(
+                  '按场景配',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 10.5,
+                    color: _kAccent.withValues(alpha: 0.9),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      if (!active)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(
+            '都是 0 时不生效；调大就把那一端往纸的范围里收',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 9.5,
+              color: _kTextDim.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      _sliderRow(
+        theme,
+        label: '高光回收',
+        valueLabel: _highlightPull <= 0
+            ? '关'
+            : '${_highlightPull.toStringAsFixed(1)} EV',
+        value: _highlightPull,
+        min: 0,
+        max: 6,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _highlightPull = value),
+        onChangeEnd: (_) => _applyLatitude(),
+      ),
+      _sliderRow(
+        theme,
+        label: '暗部回收',
+        valueLabel:
+            _shadowPull <= 0 ? '关' : '${_shadowPull.toStringAsFixed(1)} EV',
+        value: _shadowPull,
+        min: 0,
+        max: 6,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _shadowPull = value),
+        onChangeEnd: (_) => _applyLatitude(),
+      ),
+    ];
+  }
+
   List<Widget> _grainSliders(ThemeData theme, bool canRender) {
     return [
       _sectionHeader(theme, '质感', onReset: canRender ? _resetGrain : null),
@@ -4643,6 +4794,7 @@ class _EditorPageState extends State<EditorPage> {
 
   void _resetLive() {
     _pushUndo();
+    final hadLatitude = _highlightPull > 0 || _shadowPull > 0;
     setState(() {
       _strength = 1;
       _exposureEv = 0;
@@ -4650,8 +4802,15 @@ class _EditorPageState extends State<EditorPage> {
       _yellow = 0;
       _shiftScale = 1;
       _preflash = 0;
+      _highlightPull = 0;
+      _shadowPull = 0;
     });
-    _requestLive();
+    // Turning a latitude curve off is a reprint, not a live tweak.
+    if (hadLatitude) {
+      _applyLatitude();
+    } else {
+      _requestLive();
+    }
   }
 }
 
