@@ -761,6 +761,11 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> _applyPreset(Preset preset) async {
     _pushUndo();
     _applySettings(preset.settings);
+    // A preset carries no framing: the crop inside it was drawn on another
+    // picture, and a half-consumed one would be applied to the next import.
+    _pendingCrop = null;
+    _pendingCropWidth = null;
+    _pendingCropHeight = null;
     if (!_hasSession) return;
     setState(() => _busy = true);
     try {
@@ -809,8 +814,11 @@ class _EditorPageState extends State<EditorPage> {
         ],
       ),
     );
-    controller.dispose();
-    return (result == null || result.isEmpty) ? null : result;
+    // The dialog's close animation still paints the field for a moment; freeing
+    // the controller now trips "used after being disposed" on that last frame.
+    Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
+    if (result == null || result.isEmpty) return null;
+    return result;
   }
 
   /// Back to the picker without restarting: the engine keeps its resources,
@@ -1344,6 +1352,10 @@ class _EditorPageState extends State<EditorPage> {
       await _showFrame(frame, fast: true, wallMs: null);
       unawaited(_ensureSource());
     } catch (error) {
+      // A failed open must not leave a crop waiting to land on the next file.
+      _pendingCrop = null;
+      _pendingCropWidth = null;
+      _pendingCropHeight = null;
       _setError(error);
     } finally {
       if (mounted) {
@@ -1418,6 +1430,9 @@ class _EditorPageState extends State<EditorPage> {
       final frame = await _worker!.reprint(tier: 'live');
       await _showFrame(frame, fast: true, wallMs: null);
     } catch (error) {
+      _pendingCrop = null;
+      _pendingCropWidth = null;
+      _pendingCropHeight = null;
       _setError(error);
     } finally {
       if (mounted) {
@@ -1464,6 +1479,11 @@ class _EditorPageState extends State<EditorPage> {
     halation: _halation,
     glare: _glare,
     strength: _strength,
+    scatter: _scatter,
+    noAntihalation: _noAntihalation,
+    cameraFilter: _cameraFilter,
+    highlightPull: _highlightPull,
+    shadowPull: _shadowPull,
     layer2: _layer2,
   );
 
@@ -1479,6 +1499,11 @@ class _EditorPageState extends State<EditorPage> {
     _halation = snapshot.halation;
     _glare = snapshot.glare;
     _strength = snapshot.strength;
+    _scatter = snapshot.scatter;
+    _noAntihalation = snapshot.noAntihalation;
+    _cameraFilter = snapshot.cameraFilter;
+    _highlightPull = snapshot.highlightPull;
+    _shadowPull = snapshot.shadowPull;
     _layer2 = snapshot.layer2;
   }
 
@@ -1500,6 +1525,9 @@ class _EditorPageState extends State<EditorPage> {
       _quality = PreviewQuality.fast;
     });
     try {
+      // A latitude curve is not a parameter the snapshot can carry: it has to
+      // be re-solved for the restored pull-backs before this reprint.
+      await _applyLatitude(quiet: true, render: false);
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
@@ -1526,6 +1554,9 @@ class _EditorPageState extends State<EditorPage> {
       _quality = PreviewQuality.fast;
     });
     try {
+      // A latitude curve is not a parameter the snapshot can carry: it has to
+      // be re-solved for the restored pull-backs before this reprint.
+      await _applyLatitude(quiet: true, render: false);
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
@@ -1777,7 +1808,7 @@ class _EditorPageState extends State<EditorPage> {
       );
       if (!mounted) return;
       if (dialogOpen) Navigator.of(context, rootNavigator: true).pop();
-      await _showExportResult(photo);
+      await _showExportResult(photo, options);
     } catch (error) {
       if (!mounted) return;
       if (dialogOpen) Navigator.of(context, rootNavigator: true).pop();
@@ -1793,7 +1824,14 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
-  Future<void> _showExportResult(ExportedPhoto photo) async {
+  Future<void> _showExportResult(ExportedPhoto photo, _ExportOptions options) async {
+    // "原尺寸" is a request, not a promise: past the device's buffer the
+    // engine renders a smaller frame, and the result has to say so rather than
+    // look like the export quietly failed.
+    final actualEdge = photo.width > photo.height ? photo.width : photo.height;
+    final wantedEdge = options.longEdge ??
+        (_sourceWidth > _sourceHeight ? _sourceWidth : _sourceHeight);
+    final shrunk = wantedEdge > 0 && actualEdge < wantedEdge * 0.98;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1818,11 +1856,20 @@ class _EditorPageState extends State<EditorPage> {
               photo.inGallery ? '已存入相册 Spektrafilm' : '相册写入失败，文件保存在应用目录',
               style: const TextStyle(fontSize: 12, color: _kTextDim),
             ),
-            const SizedBox(height: 4),
-            SelectableText(
-              photo.path,
-              style: const TextStyle(fontSize: 11, color: _kTextDim),
-            ),
+            if (shrunk) ...[
+              const SizedBox(height: 4),
+              Text(
+                '受本机显存限制，按长边 $actualEdge 渲染',
+                style: const TextStyle(fontSize: 11, color: _kAccent),
+              ),
+            ],
+            if (!photo.inGallery) ...[
+              const SizedBox(height: 4),
+              SelectableText(
+                photo.path,
+                style: const TextStyle(fontSize: 11, color: _kTextDim),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -5296,6 +5343,11 @@ class _EditSnapshot {
     required this.halation,
     required this.glare,
     required this.strength,
+    required this.scatter,
+    required this.noAntihalation,
+    required this.cameraFilter,
+    required this.highlightPull,
+    required this.shadowPull,
     required this.layer2,
   });
 
@@ -5310,6 +5362,18 @@ class _EditSnapshot {
   final double halation;
   final double glare;
   final double strength;
+
+  /// The grain page's own controls. They were missing here, so undoing a
+  /// scatter or filter change moved the picture back and left the slider
+  /// where it was.
+  final double scatter;
+  final bool noAntihalation;
+  final String cameraFilter;
+
+  /// Scene latitude is solved rather than sent, so undo has to re-fit it.
+  final double highlightPull;
+  final double shadowPull;
+
   final Layer2Params layer2;
 }
 
