@@ -23,6 +23,9 @@ class PhotoSettings {
     this.shiftScale = 1,
     this.preflash = 0,
     this.strength = 1,
+    this.lensBlur = 0,
+    this.dirOn = true,
+    this.dirAmount = 1,
     this.grain = 1,
     this.halation = 1,
     this.glare = 0,
@@ -66,6 +69,9 @@ class PhotoSettings {
   final double preflash;
 
   final double strength;
+  final double lensBlur;
+  final bool dirOn;
+  final double dirAmount;
   final double grain;
   final double halation;
   final double glare;
@@ -120,6 +126,9 @@ class PhotoSettings {
         'shiftScale': shiftScale,
         'preflash': preflash,
         'strength': strength,
+        'lensBlur': lensBlur,
+        'dirOn': dirOn,
+        'dirAmount': dirAmount,
         'grain': grain,
         'halation': halation,
         'glare': glare,
@@ -190,6 +199,9 @@ class PhotoSettings {
       shiftScale: d('shiftScale', 1),
       preflash: d('preflash', 0),
       strength: d('strength', 1),
+      lensBlur: d('lensBlur', 0),
+      dirOn: b('dirOn', true),
+      dirAmount: d('dirAmount', 1),
       grain: d('grain', 1),
       halation: d('halation', 1),
       glare: d('glare', 0),

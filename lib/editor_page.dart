@@ -105,6 +105,15 @@ class _EditorPageState extends State<EditorPage> {
   /// notion of "half a film".
   double _strength = 1;
 
+  /// Optical blur of the taking lens, µm. The engine's default is 0, so this
+  /// starts off and the user dials in how much softness the lens has.
+  double _lensBlur = 0;
+
+  /// DIR couplers: the development inhibition that sharpens local contrast.
+  /// The engine has them on by default; the amount is what is exposed here.
+  bool _dirOn = true;
+  double _dirAmount = 1;
+
   double _grain = 1;
   double _halation = 1;
   double _glare = 0;
@@ -310,6 +319,9 @@ class _EditorPageState extends State<EditorPage> {
   };
 
   Map<String, Object?> _slowDelta() => {
+    'lens_blur_um': _lensBlur,
+    'dir_couplers_active': _dirOn,
+    'dir_couplers_amount': _dirAmount,
     'grain_amount': _grain,
     'halation_amount': _halation,
     'glare_amount': _glare,
@@ -484,6 +496,9 @@ class _EditorPageState extends State<EditorPage> {
       'date_imprint_active': _dateOn,
       if (_dateOn)
         'date_imprint_text': _dateText.isEmpty ? defaultDateText() : _dateText,
+      // A pair exposes the date twice; without this the second frame has none.
+      if (_dateOn)
+        'date_imprint_text_b': _dateText.isEmpty ? defaultDateText() : _dateText,
       if (_dateOn) 'date_imprint_style': _dateStyle,
       if (_dateOn) 'date_imprint_corner': _dateCorner,
       if (_dateOn) 'date_imprint_size': _dateSize,
@@ -1159,6 +1174,9 @@ class _EditorPageState extends State<EditorPage> {
       grain: _grain,
       halation: _halation,
       glare: _glare,
+      lensBlur: _lensBlur,
+      dirOn: _dirOn,
+      dirAmount: _dirAmount,
       scatter: _scatter,
       noAntihalation: _noAntihalation,
       cameraFilter: _cameraFilter,
@@ -1240,6 +1258,9 @@ class _EditorPageState extends State<EditorPage> {
       _grain = s.grain;
       _halation = s.halation;
       _glare = s.glare;
+      _lensBlur = s.lensBlur;
+      _dirOn = s.dirOn;
+      _dirAmount = s.dirAmount;
       _scatter = s.scatter;
       _noAntihalation = s.noAntihalation;
       _cameraFilter = s.cameraFilter;
@@ -1479,6 +1500,9 @@ class _EditorPageState extends State<EditorPage> {
     halation: _halation,
     glare: _glare,
     strength: _strength,
+    lensBlur: _lensBlur,
+    dirOn: _dirOn,
+    dirAmount: _dirAmount,
     scatter: _scatter,
     noAntihalation: _noAntihalation,
     cameraFilter: _cameraFilter,
@@ -1499,6 +1523,9 @@ class _EditorPageState extends State<EditorPage> {
     _halation = snapshot.halation;
     _glare = snapshot.glare;
     _strength = snapshot.strength;
+    _lensBlur = snapshot.lensBlur;
+    _dirOn = snapshot.dirOn;
+    _dirAmount = snapshot.dirAmount;
     _scatter = snapshot.scatter;
     _noAntihalation = snapshot.noAntihalation;
     _cameraFilter = snapshot.cameraFilter;
@@ -4104,6 +4131,19 @@ class _EditorPageState extends State<EditorPage> {
       _sectionHeader(theme, '质感', onReset: canRender ? _resetGrain : null),
       _sliderRow(
         theme,
+        label: '镜头模糊',
+        valueLabel:
+            _lensBlur <= 0 ? '关' : '${_lensBlur.toStringAsFixed(0)} µm',
+        value: _lensBlur,
+        min: 0,
+        max: 30,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _lensBlur = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _sliderRow(
+        theme,
         label: '颗粒',
         valueLabel: _grain.toStringAsFixed(2),
         value: _grain,
@@ -4162,6 +4202,31 @@ class _EditorPageState extends State<EditorPage> {
           _applySlow();
         },
       ),
+      _switchRow(
+        theme,
+        '边缘效应',
+        subtitle: '显影时相邻染料的相互抑制，让局部反差更硬',
+        value: _dirOn,
+        enabled: canRender,
+        onChanged: (value) {
+          _pushUndo();
+          setState(() => _dirOn = value);
+          _applySlow();
+        },
+      ),
+      if (_dirOn)
+        _sliderRow(
+          theme,
+          label: '效应强度',
+          valueLabel: _dirAmount.toStringAsFixed(2),
+          value: _dirAmount,
+          min: 0,
+          max: 4,
+          enabled: canRender,
+          onChangeStart: (_) => _pushUndo(),
+          onChanged: (value) => setState(() => _dirAmount = value),
+          onChangeEnd: (_) => _applySlow(),
+        ),
       _filterRow(theme, canRender),
       Padding(
         padding: const EdgeInsets.fromLTRB(70, 2, 16, 0),
@@ -4661,6 +4726,9 @@ class _EditorPageState extends State<EditorPage> {
   void _resetGrain() {
     _pushUndo();
     setState(() {
+      _lensBlur = 0;
+      _dirOn = true;
+      _dirAmount = 1;
       _grain = 1;
       _halation = 1;
       _glare = 0;
@@ -5343,6 +5411,9 @@ class _EditSnapshot {
     required this.halation,
     required this.glare,
     required this.strength,
+    required this.lensBlur,
+    required this.dirOn,
+    required this.dirAmount,
     required this.scatter,
     required this.noAntihalation,
     required this.cameraFilter,
@@ -5366,6 +5437,9 @@ class _EditSnapshot {
   /// The grain page's own controls. They were missing here, so undoing a
   /// scatter or filter change moved the picture back and left the slider
   /// where it was.
+  final double lensBlur;
+  final bool dirOn;
+  final double dirAmount;
   final double scatter;
   final bool noAntihalation;
   final String cameraFilter;
