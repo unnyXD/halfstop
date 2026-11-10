@@ -1273,9 +1273,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           if (_highlightPull > 0 || _shadowPull > 0) {
             await _applyLatitude(quiet: true, render: false);
           }
-          final frame = (fullSize && !cappedByRebate)
-              ? await worker.render(tier: 'full')
-              : await worker.reprint(tier: 'live');
+          // `reprint` re-prints the negative already in the session, and this
+          // picture was just opened: there is nothing developed to print yet,
+          // so the batch has to run the full chain for every frame.
+          final frame = await worker.render(
+            tier: (fullSize && !cappedByRebate) ? 'full' : 'live',
+          );
           RenderFrame? sourceFrame;
           if (_strength < 0.999) {
             sourceFrame =
@@ -2307,9 +2310,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           children: [
             _buildHeader(theme),
             Expanded(
-              child: _cropping
-                  ? _buildCropPreview(theme)
-                  : _buildPreview(theme),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: _cropping
+                        ? _buildCropPreview(theme)
+                        : _buildPreview(theme),
+                  ),
+                  // A row of the same pictures the picker lists, so a shoot can
+                  // be walked through without going back and forth.
+                  if (!_cropping && _cached.length > 1) _buildStrip(theme),
+                ],
+              ),
             ),
             if (_error != null) _buildErrorBar(theme),
             if (_cropping)
@@ -3230,6 +3242,59 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   /// The film in use, as one row: mark, name, paper, format. Tap picks a film,
   /// long-press picks a paper.
+  /// The row under the picture: every import, the open one ringed.
+  Widget _buildStrip(ThemeData theme) {
+    return Container(
+      height: 62,
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: _kLine, width: 1)),
+      ),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        itemCount: _cached.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, index) {
+          final entry = _cached[index];
+          final current = entry.path == _path;
+          final source = entry.isPhoto ? entry.path : (entry.thumb ?? '');
+          final ready = source.isNotEmpty && File(source).existsSync();
+          return GestureDetector(
+            onTap: _busy || _booting
+                ? null
+                : () {
+                    if (current) return;
+                    unawaited(HapticFeedback.selectionClick());
+                    _openCached(entry);
+                  },
+            child: Container(
+              width: 46,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: current ? _kAccent : _kLine,
+                  width: current ? 1.8 : 1,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(5),
+                child: ready
+                    ? Image.file(
+                        File(source),
+                        fit: BoxFit.cover,
+                        cacheWidth: 140,
+                        errorBuilder: (_, _, _) =>
+                            ColoredBox(color: _kSurfaceHigh),
+                      )
+                    : ColoredBox(color: _kSurfaceHigh),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildFilmRow(ThemeData theme) {
     final enabled = !_busy && _stocks.isNotEmpty;
     return Padding(
