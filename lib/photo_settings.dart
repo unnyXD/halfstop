@@ -24,6 +24,8 @@ class PhotoSettings {
     this.preflash = 0,
     this.strength = 1,
     this.lensBlur = 0,
+    this.densityGamma = 1,
+    this.filmFormatMm = 35,
     this.dirOn = true,
     this.dirAmount = 1,
     this.grain = 1,
@@ -83,6 +85,8 @@ class PhotoSettings {
 
   final double strength;
   final double lensBlur;
+  final double densityGamma;
+  final double filmFormatMm;
   final bool dirOn;
   final double dirAmount;
   final double grain;
@@ -155,6 +159,8 @@ class PhotoSettings {
         'preflash': preflash,
         'strength': strength,
         'lensBlur': lensBlur,
+        'densityGamma': densityGamma,
+        'filmFormatMm': filmFormatMm,
         'dirOn': dirOn,
         'dirAmount': dirAmount,
         'grain': grain,
@@ -241,6 +247,8 @@ class PhotoSettings {
       preflash: d('preflash', 0),
       strength: d('strength', 1),
       lensBlur: d('lensBlur', 0),
+      densityGamma: d('densityGamma', 1),
+      filmFormatMm: d('filmFormatMm', 35),
       dirOn: b('dirOn', true),
       dirAmount: d('dirAmount', 1),
       grain: d('grain', 1),

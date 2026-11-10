@@ -129,6 +129,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   /// changes black-and-white stocks — colour emulsions carry their own dyes.
   String _cameraFilter = '';
 
+  /// The slope of the density curve itself, not a stretch of the pixels.
+  double _densityGamma = 1;
+
+  /// The film's width in mm: it sets how big a grain is relative to the frame.
+  double _filmFormatMm = 35;
+
   /// Fine rotation on top of the quarter turns, degrees.
   double _rotationDeg = 0;
 
@@ -385,6 +391,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Map<String, Object?> _slowDelta() => {
     'lens_blur_um': _lensBlur,
+    'density_curve_gamma': _densityGamma,
+    'film_format_mm': _filmFormatMm,
     'halation_boost_ev': _halationBoost,
     'halation_headroom_ev': _halationHeadroom,
     'grain_sublayers_active': _grainSublayers,
@@ -1533,6 +1541,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       halation: _halation,
       glare: _glare,
       lensBlur: _lensBlur,
+      densityGamma: _densityGamma,
+      filmFormatMm: _filmFormatMm,
       dirOn: _dirOn,
       dirAmount: _dirAmount,
       scatter: _scatter,
@@ -1630,6 +1640,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _halation = s.halation;
       _glare = s.glare;
       _lensBlur = s.lensBlur;
+      _densityGamma = s.densityGamma;
+      _filmFormatMm = s.filmFormatMm;
       _dirOn = s.dirOn;
       _dirAmount = s.dirAmount;
       _scatter = s.scatter;
@@ -1899,6 +1911,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     cameraSeed: _cameraSeed,
     frameSeed: _frameSeed,
     lensBlur: _lensBlur,
+    densityGamma: _densityGamma,
+    filmFormatMm: _filmFormatMm,
     dirOn: _dirOn,
     dirAmount: _dirAmount,
     scatter: _scatter,
@@ -1932,6 +1946,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     _cameraSeed = snapshot.cameraSeed;
     _frameSeed = snapshot.frameSeed;
     _lensBlur = snapshot.lensBlur;
+    _densityGamma = snapshot.densityGamma;
+    _filmFormatMm = snapshot.filmFormatMm;
     _dirOn = snapshot.dirOn;
     _dirAmount = snapshot.dirAmount;
     _scatter = snapshot.scatter;
@@ -3956,6 +3972,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final crop = _cropBox;
 
     return [
+      _sliderRow(
+        theme,
+        label: '胶片宽度',
+        valueLabel: '${_filmFormatMm.toStringAsFixed(0)} mm',
+        value: _filmFormatMm,
+        min: 4,
+        max: 200,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _filmFormatMm = value),
+        onChangeEnd: (_) => _applyFrame(label: '换胶卷…'),
+      ),
       _sectionHeader(
         theme,
         '画面',
@@ -4827,6 +4855,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       // Pre-flash is intentionally not exposed: `preflash_exposure` is a
       // fraction of the film base density, and 1.0 crushes the print to black.
       // The only visible effect in a usable range duplicates exposure.
+      _sliderRow(
+        theme,
+        label: '密度曲线',
+        valueLabel: 'γ ${_densityGamma.toStringAsFixed(2)}',
+        value: _densityGamma,
+        min: 0.2,
+        max: 4,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _densityGamma = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
       _choiceRow(
         theme,
         '放大光源',
@@ -5552,6 +5592,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     _pushUndo();
     setState(() {
       _lensBlur = 0;
+      _densityGamma = 1;
       _dirOn = true;
       _dirAmount = 1;
       _halationBoost = 0;
@@ -6250,6 +6291,8 @@ class _EditSnapshot {
     required this.cameraSeed,
     required this.frameSeed,
     required this.lensBlur,
+    required this.densityGamma,
+    required this.filmFormatMm,
     required this.dirOn,
     required this.dirAmount,
     required this.scatter,
@@ -6286,6 +6329,8 @@ class _EditSnapshot {
   final int cameraSeed;
   final int frameSeed;
   final double lensBlur;
+  final double densityGamma;
+  final double filmFormatMm;
   final bool dirOn;
   final double dirAmount;
   final double scatter;
