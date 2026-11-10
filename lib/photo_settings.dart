@@ -48,6 +48,7 @@ class PhotoSettings {
     this.dateInsetY = 2.4,
     this.cameraSeed = 0,
     this.frameSeed = 0,
+    this.illuminant = 'TH-KG3',
     this.scanFilm = false,
     this.scanWhiteCorrection = false,
     this.scanBlackCorrection = false,
@@ -117,6 +118,7 @@ class PhotoSettings {
   final double dateInsetY;
   final int cameraSeed;
   final int frameSeed;
+  final String illuminant;
   final bool scanFilm;
   final bool scanWhiteCorrection;
   final bool scanBlackCorrection;
@@ -191,6 +193,7 @@ class PhotoSettings {
         'dateInsetY': dateInsetY,
         'cameraSeed': cameraSeed,
         'frameSeed': frameSeed,
+        'illuminant': illuminant,
         'scanFilm': scanFilm,
         'scanWhiteCorrection': scanWhiteCorrection,
         'scanBlackCorrection': scanBlackCorrection,
@@ -280,6 +283,7 @@ class PhotoSettings {
       dateInsetY: d('dateInsetY', 2.4),
       cameraSeed: i('cameraSeed', 0),
       frameSeed: i('frameSeed', 0),
+      illuminant: s('illuminant', 'TH-KG3'),
       scanFilm: b('scanFilm', false),
       scanWhiteCorrection: b('scanWhiteCorrection', false),
       scanBlackCorrection: b('scanBlackCorrection', false),

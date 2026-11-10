@@ -145,6 +145,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   double _dateInsetX = 3;
   double _dateInsetY = 2.4;
 
+  /// The enlarger's lamp. Changing it moves every neutral filter with it, so
+  /// the pack is re-solved rather than left to drift.
+  String _illuminant = 'TH-KG3';
+
   /// Scanner emulation: treat the print as a scan rather than a print.
   bool _scanFilm = false;
   bool _scanWhiteCorrection = false;
@@ -380,6 +384,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     'halation_boost_ev': _halationBoost,
     'halation_headroom_ev': _halationHeadroom,
     'grain_sublayers_active': _grainSublayers,
+    'enlarger_illuminant': _illuminant,
     'scan_film': _scanFilm,
     'scanner_white_correction': _scanWhiteCorrection,
     'scanner_black_correction': _scanBlackCorrection,
@@ -907,6 +912,37 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
     if (result == null || result.isEmpty) return null;
     return result;
+  }
+
+  /// Swaps the enlarger's lamp and re-solves the neutral pack around it.
+  Future<void> _applyIlluminant(String value) async {
+    if (value == _illuminant) return;
+    _pushUndo();
+    setState(() => _illuminant = value);
+    final worker = _worker;
+    if (worker == null || !_hasSession) return;
+    setState(() => _busy = true);
+    try {
+      await worker.setParams({
+        'enlarger_illuminant': value,
+        ..._liveDelta(),
+        ..._slowDelta(),
+      });
+      // A different spectrum means a different neutral pack; solving it is
+      // what keeps the picture from drifting as soon as the lamp changes.
+      final solved = await worker.solve(target: 'filter_pack');
+      // The reply wraps them: only `solved_params` is a parameter map.
+      final pack = solved['solved_params'];
+      if (pack is Map) {
+        await worker.setParams(pack.cast<String, Object?>());
+      }
+      final frame = await worker.reprint(tier: 'live');
+      await _showFrame(frame, fast: true, wallMs: null);
+    } catch (error) {
+      _setError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// Back to the picker without restarting: the engine keeps its resources,
@@ -1497,6 +1533,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       dateInsetY: _dateInsetY,
       cameraSeed: _cameraSeed,
       frameSeed: _frameSeed,
+      illuminant: _illuminant,
       scanFilm: _scanFilm,
       scanWhiteCorrection: _scanWhiteCorrection,
       scanBlackCorrection: _scanBlackCorrection,
@@ -1598,6 +1635,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _dateInsetY = s.dateInsetY;
       _cameraSeed = s.cameraSeed;
       _frameSeed = s.frameSeed;
+      _illuminant = s.illuminant;
       _scanFilm = s.scanFilm;
       _scanWhiteCorrection = s.scanWhiteCorrection;
       _scanBlackCorrection = s.scanBlackCorrection;
@@ -4771,6 +4809,15 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       // Pre-flash is intentionally not exposed: `preflash_exposure` is a
       // fraction of the film base density, and 1.0 crushes the print to black.
       // The only visible effect in a usable range duplicates exposure.
+      _choiceRow(
+        theme,
+        '放大光源',
+        const ['TH-KG3', 'TH-KG3-L', 'BB3200', 'K75P'],
+        const ['KG3 冷光', 'KG3 + 镜头', '3200K', '放映机'],
+        _illuminant,
+        canRender,
+        (value) => _applyIlluminant(value),
+      ),
       ..._latitudeRows(theme, canRender),
     ];
   }
