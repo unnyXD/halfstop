@@ -149,12 +149,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   /// the pack is re-solved rather than left to drift.
   String _illuminant = 'TH-KG3';
 
-  /// Scanner emulation: treat the print as a scan rather than a print.
-  bool _scanFilm = false;
-  bool _scanWhiteCorrection = false;
-  bool _scanBlackCorrection = false;
-  double _scannerBlur = 0;
-
   /// Seeds for the rebate's dye clouds and light leaks: same seed, same
   /// pattern. 0 lets the engine pick.
   int _cameraSeed = 0;
@@ -393,10 +387,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     'halation_headroom_ev': _halationHeadroom,
     'grain_sublayers_active': _grainSublayers,
     'enlarger_illuminant': _illuminant,
-    'scan_film': _scanFilm,
-    'scanner_white_correction': _scanWhiteCorrection,
-    'scanner_black_correction': _scanBlackCorrection,
-    'scanner_lens_blur': _scannerBlur,
     'dir_couplers_active': _dirOn,
     'dir_couplers_amount': _dirAmount,
     'grain_amount': _grain,
@@ -1542,10 +1532,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       cameraSeed: _cameraSeed,
       frameSeed: _frameSeed,
       illuminant: _illuminant,
-      scanFilm: _scanFilm,
-      scanWhiteCorrection: _scanWhiteCorrection,
-      scanBlackCorrection: _scanBlackCorrection,
-      scannerBlur: _scannerBlur,
       formatId: _format?.id,
       crop: crop == null
           ? null
@@ -1644,10 +1630,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _cameraSeed = s.cameraSeed;
       _frameSeed = s.frameSeed;
       _illuminant = s.illuminant;
-      _scanFilm = s.scanFilm;
-      _scanWhiteCorrection = s.scanWhiteCorrection;
-      _scanBlackCorrection = s.scanBlackCorrection;
-      _scannerBlur = s.scannerBlur;
       _crop = null;
       _overscanOn = s.overscanOn;
       _overscanMode = s.overscanMode;
@@ -4832,76 +4814,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   /// Grain, halation and glare — the surface of the print. These are the slow
   /// ones: they re-develop the negative rather than just reprint it.
-  /// Scanner emulation: the print read back off a scanner instead of viewed
-  /// under the enlarger.
-  List<Widget> _scannerRows(ThemeData theme, bool canRender) {
-    return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 2),
-        child: Text(
-          '扫描',
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontSize: 11,
-            letterSpacing: 1.2,
-            color: _kTextDim,
-          ),
-        ),
-      ),
-      _switchRow(
-        theme,
-        '当扫描件处理',
-        subtitle: '成片按扫描仪读回来的方式算，不是放大机下的样子',
-        value: _scanFilm,
-        enabled: canRender,
-        onChanged: (value) {
-          _pushUndo();
-          setState(() => _scanFilm = value);
-          _applySlow();
-        },
-      ),
-      if (_scanFilm) ...[
-        _switchRow(
-          theme,
-          '白场校正',
-          subtitle: '按扫描仪的白色基准拉平',
-          value: _scanWhiteCorrection,
-          enabled: canRender,
-          onChanged: (value) {
-            _pushUndo();
-            setState(() => _scanWhiteCorrection = value);
-            _applySlow();
-          },
-        ),
-        _switchRow(
-          theme,
-          '黑场校正',
-          subtitle: '扣掉扫描仪自己的底噪',
-          value: _scanBlackCorrection,
-          enabled: canRender,
-          onChanged: (value) {
-            _pushUndo();
-            setState(() => _scanBlackCorrection = value);
-            _applySlow();
-          },
-        ),
-        _sliderRow(
-          theme,
-          label: '扫描头柔化',
-          valueLabel: _scannerBlur <= 0
-              ? '关'
-              : '${_scannerBlur.toStringAsFixed(0)} µm',
-          value: _scannerBlur,
-          min: 0,
-          max: 20,
-          enabled: canRender,
-          onChangeStart: (_) => _pushUndo(),
-          onChanged: (value) => setState(() => _scannerBlur = value),
-          onChangeEnd: (_) => _applySlow(),
-        ),
-      ],
-    ];
-  }
-
   /// Scene latitude: the two ends of the scene, pulled onto what this paper
   /// can hold, with a neutral core left exactly alone.
   List<Widget> _latitudeRows(ThemeData theme, bool canRender) {
@@ -5113,7 +5025,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           onChangeEnd: (_) => _applySlow(),
         ),
       _filterRow(theme, canRender),
-      ..._scannerRows(theme, canRender),
       Padding(
         padding: const EdgeInsets.fromLTRB(70, 2, 16, 0),
         child: Text(

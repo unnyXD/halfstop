@@ -49,10 +49,6 @@ class PhotoSettings {
     this.cameraSeed = 0,
     this.frameSeed = 0,
     this.illuminant = 'TH-KG3',
-    this.scanFilm = false,
-    this.scanWhiteCorrection = false,
-    this.scanBlackCorrection = false,
-    this.scannerBlur = 0,
     this.crop,
     this.cropOnWidth,
     this.cropOnHeight,
@@ -119,10 +115,6 @@ class PhotoSettings {
   final int cameraSeed;
   final int frameSeed;
   final String illuminant;
-  final bool scanFilm;
-  final bool scanWhiteCorrection;
-  final bool scanBlackCorrection;
-  final double scannerBlur;
 
   /// Normalised to the picture, so it carries across files of any size.
   final CropRect? crop;
@@ -194,10 +186,6 @@ class PhotoSettings {
         'cameraSeed': cameraSeed,
         'frameSeed': frameSeed,
         'illuminant': illuminant,
-        'scanFilm': scanFilm,
-        'scanWhiteCorrection': scanWhiteCorrection,
-        'scanBlackCorrection': scanBlackCorrection,
-        'scannerBlur': scannerBlur,
         if (crop != null)
           'crop': {
             'x': crop!.x,
@@ -284,10 +272,6 @@ class PhotoSettings {
       cameraSeed: i('cameraSeed', 0),
       frameSeed: i('frameSeed', 0),
       illuminant: s('illuminant', 'TH-KG3'),
-      scanFilm: b('scanFilm', false),
-      scanWhiteCorrection: b('scanWhiteCorrection', false),
-      scanBlackCorrection: b('scanBlackCorrection', false),
-      scannerBlur: d('scannerBlur', 0),
       crop: cropMap == null
           ? null
           : CropRect(
