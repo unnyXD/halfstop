@@ -129,6 +129,33 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   /// changes black-and-white stocks — colour emulsions carry their own dyes.
   String _cameraFilter = '';
 
+  /// Fine rotation on top of the quarter turns, degrees.
+  double _rotationDeg = 0;
+
+  /// How much of a clipped highlight the model assumes there was, and how far
+  /// the roll-off lifts it. Engine defaults are 0 and 4.
+  double _halationBoost = 0;
+  double _halationHeadroom = 4;
+
+  /// Multi-layer grain, on by default in the engine.
+  bool _grainSublayers = true;
+
+  /// The date's own exposure and its insets from the gate, in mm.
+  double _dateEv = 3.5;
+  double _dateInsetX = 3;
+  double _dateInsetY = 2.4;
+
+  /// Scanner emulation: treat the print as a scan rather than a print.
+  bool _scanFilm = false;
+  bool _scanWhiteCorrection = false;
+  bool _scanBlackCorrection = false;
+  double _scannerBlur = 0;
+
+  /// Seeds for the rebate's dye clouds and light leaks: same seed, same
+  /// pattern. 0 lets the engine pick.
+  int _cameraSeed = 0;
+  int _frameSeed = 0;
+
   /// The picture's own orientation. The crop is read in the source's
   /// coordinates, so turning or flipping never moves it.
   bool _flipH = false;
@@ -350,6 +377,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Map<String, Object?> _slowDelta() => {
     'lens_blur_um': _lensBlur,
+    'halation_boost_ev': _halationBoost,
+    'halation_headroom_ev': _halationHeadroom,
+    'grain_sublayers_active': _grainSublayers,
+    'scan_film': _scanFilm,
+    'scanner_white_correction': _scanWhiteCorrection,
+    'scanner_black_correction': _scanBlackCorrection,
+    'scanner_lens_blur': _scannerBlur,
     'dir_couplers_active': _dirOn,
     'dir_couplers_amount': _dirAmount,
     'grain_amount': _grain,
@@ -505,6 +539,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       'geometry_flip_h': _flipH,
       'geometry_flip_v': _flipV,
       'geometry_quarter_turns': _quarterTurns,
+      'geometry_rotation_deg': _rotationDeg,
       'geometry_crop_x': crop.x,
       'geometry_crop_y': crop.y,
       'geometry_crop_w': crop.width,
@@ -515,6 +550,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       'overscan_mode': _overscanMode,
       'overscan_holes': _holes,
       'overscan_carrier': _carrier,
+      'overscan_camera_seed': _cameraSeed,
+      'overscan_frame_seed': _frameSeed,
       'overscan_gate': _gate,
       'overscan_fog': _edgeFog,
       'overscan_leaks': _leaks,
@@ -535,6 +572,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       if (_dateOn) 'date_imprint_style': _dateStyle,
       if (_dateOn) 'date_imprint_corner': _dateCorner,
       if (_dateOn) 'date_imprint_size': _dateSize,
+      if (_dateOn) 'date_imprint_ev': _dateEv,
+      if (_dateOn) 'date_imprint_inset_x': _dateInsetX,
+      if (_dateOn) 'date_imprint_inset_y': _dateInsetY,
       if (_dateOn) 'date_imprint_data_text': _dataText,
       // The rebate only exists when the rebate is drawn.
       if (_dateOn)
@@ -1448,6 +1488,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       flipH: _flipH,
       flipV: _flipV,
       quarterTurns: _quarterTurns,
+      rotationDeg: _rotationDeg,
+      halationBoost: _halationBoost,
+      halationHeadroom: _halationHeadroom,
+      grainSublayers: _grainSublayers,
+      dateEv: _dateEv,
+      dateInsetX: _dateInsetX,
+      dateInsetY: _dateInsetY,
+      cameraSeed: _cameraSeed,
+      frameSeed: _frameSeed,
+      scanFilm: _scanFilm,
+      scanWhiteCorrection: _scanWhiteCorrection,
+      scanBlackCorrection: _scanBlackCorrection,
+      scannerBlur: _scannerBlur,
       formatId: _format?.id,
       crop: crop == null
           ? null
@@ -1536,6 +1589,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _flipH = s.flipH;
       _flipV = s.flipV;
       _quarterTurns = s.quarterTurns;
+      _rotationDeg = s.rotationDeg;
+      _halationBoost = s.halationBoost;
+      _halationHeadroom = s.halationHeadroom;
+      _grainSublayers = s.grainSublayers;
+      _dateEv = s.dateEv;
+      _dateInsetX = s.dateInsetX;
+      _dateInsetY = s.dateInsetY;
+      _cameraSeed = s.cameraSeed;
+      _frameSeed = s.frameSeed;
+      _scanFilm = s.scanFilm;
+      _scanWhiteCorrection = s.scanWhiteCorrection;
+      _scanBlackCorrection = s.scanBlackCorrection;
+      _scannerBlur = s.scannerBlur;
       _crop = null;
       _overscanOn = s.overscanOn;
       _overscanMode = s.overscanMode;
@@ -1771,6 +1837,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     flipH: _flipH,
     flipV: _flipV,
     quarterTurns: _quarterTurns,
+    rotationDeg: _rotationDeg,
+    halationBoost: _halationBoost,
+    halationHeadroom: _halationHeadroom,
+    grainSublayers: _grainSublayers,
+    dateEv: _dateEv,
+    cameraSeed: _cameraSeed,
+    frameSeed: _frameSeed,
     lensBlur: _lensBlur,
     dirOn: _dirOn,
     dirAmount: _dirAmount,
@@ -1797,6 +1870,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     _flipH = snapshot.flipH;
     _flipV = snapshot.flipV;
     _quarterTurns = snapshot.quarterTurns;
+    _rotationDeg = snapshot.rotationDeg;
+    _halationBoost = snapshot.halationBoost;
+    _halationHeadroom = snapshot.halationHeadroom;
+    _grainSublayers = snapshot.grainSublayers;
+    _dateEv = snapshot.dateEv;
+    _cameraSeed = snapshot.cameraSeed;
+    _frameSeed = snapshot.frameSeed;
     _lensBlur = snapshot.lensBlur;
     _dirOn = snapshot.dirOn;
     _dirAmount = snapshot.dirAmount;
@@ -3809,6 +3889,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _flipH = false;
       _flipV = false;
       _quarterTurns = 0;
+      _rotationDeg = 0;
     });
     unawaited(_applyFrame(label: '还原方向…'));
   }
@@ -3846,6 +3927,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             }),
           ],
         ),
+      ),
+      _sliderRow(
+        theme,
+        label: '微调角度',
+        valueLabel: '${_rotationDeg.toStringAsFixed(1)}°',
+        value: _rotationDeg,
+        min: -45,
+        max: 45,
+        enabled: enabled,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _rotationDeg = value),
+        onChangeEnd: (_) => _applyFrame(label: '旋转…'),
       ),
       _sectionHeader(theme, '片门', onReset: enabled ? _resetFrame : null),
       Padding(
@@ -3955,6 +4048,21 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           _applyFrame(label: value ? '铺片边…' : '收片边…');
         },
       ),
+      if (format != null && _overscanOn)
+        _tapRow(
+          theme,
+          '片边图案',
+          '换一张',
+          enabled,
+          () {
+            _pushUndo();
+            setState(() {
+              _cameraSeed = math.Random().nextInt(1 << 30);
+              _frameSeed = math.Random().nextInt(1 << 30);
+            });
+            unawaited(_applyFrame(label: '换片边…'));
+          },
+        ),
       if (format != null && _overscanOn) ...[
         if (_maxPlanePixels > 0 && _overscanEdge(_fineEdge) < _fineEdge)
           Padding(
@@ -4149,6 +4257,42 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           enabled: enabled,
           onChanged: (value) => setState(() => _dateSize = value),
           onChangeEnd: (_) => _applyFrame(label: '改字号…'),
+        ),
+        _sliderRow(
+          theme,
+          label: '日期曝光',
+          valueLabel: '${_dateEv.toStringAsFixed(1)} EV',
+          value: _dateEv,
+          min: -2,
+          max: 8,
+          enabled: enabled,
+          onChangeStart: (_) => _pushUndo(),
+          onChanged: (value) => setState(() => _dateEv = value),
+          onChangeEnd: (_) => _applyFrame(label: '调日期…'),
+        ),
+        _sliderRow(
+          theme,
+          label: '水平内缩',
+          valueLabel: '${_dateInsetX.toStringAsFixed(1)} mm',
+          value: _dateInsetX,
+          min: 0,
+          max: 30,
+          enabled: enabled,
+          onChangeStart: (_) => _pushUndo(),
+          onChanged: (value) => setState(() => _dateInsetX = value),
+          onChangeEnd: (_) => _applyFrame(label: '挪日期…'),
+        ),
+        _sliderRow(
+          theme,
+          label: '垂直内缩',
+          valueLabel: '${_dateInsetY.toStringAsFixed(1)} mm',
+          value: _dateInsetY,
+          min: 0,
+          max: 30,
+          enabled: enabled,
+          onChangeStart: (_) => _pushUndo(),
+          onChanged: (value) => setState(() => _dateInsetY = value),
+          onChangeEnd: (_) => _applyFrame(label: '挪日期…'),
         ),
         _tapRow(
           theme,
@@ -4633,6 +4777,76 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   /// Grain, halation and glare — the surface of the print. These are the slow
   /// ones: they re-develop the negative rather than just reprint it.
+  /// Scanner emulation: the print read back off a scanner instead of viewed
+  /// under the enlarger.
+  List<Widget> _scannerRows(ThemeData theme, bool canRender) {
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 2),
+        child: Text(
+          '扫描',
+          style: theme.textTheme.labelMedium?.copyWith(
+            fontSize: 11,
+            letterSpacing: 1.2,
+            color: _kTextDim,
+          ),
+        ),
+      ),
+      _switchRow(
+        theme,
+        '当扫描件处理',
+        subtitle: '成片按扫描仪读回来的方式算，不是放大机下的样子',
+        value: _scanFilm,
+        enabled: canRender,
+        onChanged: (value) {
+          _pushUndo();
+          setState(() => _scanFilm = value);
+          _applySlow();
+        },
+      ),
+      if (_scanFilm) ...[
+        _switchRow(
+          theme,
+          '白场校正',
+          subtitle: '按扫描仪的白色基准拉平',
+          value: _scanWhiteCorrection,
+          enabled: canRender,
+          onChanged: (value) {
+            _pushUndo();
+            setState(() => _scanWhiteCorrection = value);
+            _applySlow();
+          },
+        ),
+        _switchRow(
+          theme,
+          '黑场校正',
+          subtitle: '扣掉扫描仪自己的底噪',
+          value: _scanBlackCorrection,
+          enabled: canRender,
+          onChanged: (value) {
+            _pushUndo();
+            setState(() => _scanBlackCorrection = value);
+            _applySlow();
+          },
+        ),
+        _sliderRow(
+          theme,
+          label: '扫描头柔化',
+          valueLabel: _scannerBlur <= 0
+              ? '关'
+              : '${_scannerBlur.toStringAsFixed(0)} µm',
+          value: _scannerBlur,
+          min: 0,
+          max: 20,
+          enabled: canRender,
+          onChangeStart: (_) => _pushUndo(),
+          onChanged: (value) => setState(() => _scannerBlur = value),
+          onChangeEnd: (_) => _applySlow(),
+        ),
+      ],
+    ];
+  }
+
   /// Scene latitude: the two ends of the scene, pulled onto what this paper
   /// can hold, with a neutral core left exactly alone.
   List<Widget> _latitudeRows(ThemeData theme, bool canRender) {
@@ -4722,6 +4936,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         onChanged: (value) => setState(() => _lensBlur = value),
         onChangeEnd: (_) => _applySlow(),
       ),
+      _switchRow(
+        theme,
+        '多层颗粒',
+        subtitle: '每层乳剂各自成粒，关掉会平一些',
+        value: _grainSublayers,
+        enabled: canRender,
+        onChanged: (value) {
+          _pushUndo();
+          setState(() => _grainSublayers = value);
+          _applySlow();
+        },
+      ),
       _sliderRow(
         theme,
         label: '颗粒',
@@ -4744,6 +4970,30 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         enabled: canRender,
         onChangeStart: (_) => _pushUndo(),
         onChanged: (value) => setState(() => _halation = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _sliderRow(
+        theme,
+        label: '高光溢出',
+        valueLabel: '${_halationBoost.toStringAsFixed(1)} EV',
+        value: _halationBoost,
+        min: 0,
+        max: 8,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _halationBoost = value),
+        onChangeEnd: (_) => _applySlow(),
+      ),
+      _sliderRow(
+        theme,
+        label: '高光余量',
+        valueLabel: '${_halationHeadroom.toStringAsFixed(1)} EV',
+        value: _halationHeadroom,
+        min: 0,
+        max: 8,
+        enabled: canRender,
+        onChangeStart: (_) => _pushUndo(),
+        onChanged: (value) => setState(() => _halationHeadroom = value),
         onChangeEnd: (_) => _applySlow(),
       ),
       _sliderRow(
@@ -4808,6 +5058,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           onChangeEnd: (_) => _applySlow(),
         ),
       _filterRow(theme, canRender),
+      ..._scannerRows(theme, canRender),
       Padding(
         padding: const EdgeInsets.fromLTRB(70, 2, 16, 0),
         child: Text(
@@ -5309,6 +5560,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _lensBlur = 0;
       _dirOn = true;
       _dirAmount = 1;
+      _halationBoost = 0;
+      _halationHeadroom = 4;
+      _grainSublayers = true;
       _grain = 1;
       _halation = 1;
       _glare = 0;
@@ -5994,6 +6248,13 @@ class _EditSnapshot {
     required this.flipH,
     required this.flipV,
     required this.quarterTurns,
+    required this.rotationDeg,
+    required this.halationBoost,
+    required this.halationHeadroom,
+    required this.grainSublayers,
+    required this.dateEv,
+    required this.cameraSeed,
+    required this.frameSeed,
     required this.lensBlur,
     required this.dirOn,
     required this.dirAmount,
@@ -6023,6 +6284,13 @@ class _EditSnapshot {
   final bool flipH;
   final bool flipV;
   final int quarterTurns;
+  final double rotationDeg;
+  final double halationBoost;
+  final double halationHeadroom;
+  final bool grainSublayers;
+  final double dateEv;
+  final int cameraSeed;
+  final int frameSeed;
   final double lensBlur;
   final bool dirOn;
   final double dirAmount;

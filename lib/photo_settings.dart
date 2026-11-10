@@ -39,6 +39,19 @@ class PhotoSettings {
     this.flipH = false,
     this.flipV = false,
     this.quarterTurns = 0,
+    this.rotationDeg = 0,
+    this.halationBoost = 0,
+    this.halationHeadroom = 4,
+    this.grainSublayers = true,
+    this.dateEv = 3.5,
+    this.dateInsetX = 3,
+    this.dateInsetY = 2.4,
+    this.cameraSeed = 0,
+    this.frameSeed = 0,
+    this.scanFilm = false,
+    this.scanWhiteCorrection = false,
+    this.scanBlackCorrection = false,
+    this.scannerBlur = 0,
     this.crop,
     this.cropOnWidth,
     this.cropOnHeight,
@@ -95,6 +108,19 @@ class PhotoSettings {
   final bool flipH;
   final bool flipV;
   final int quarterTurns;
+  final double rotationDeg;
+  final double halationBoost;
+  final double halationHeadroom;
+  final bool grainSublayers;
+  final double dateEv;
+  final double dateInsetX;
+  final double dateInsetY;
+  final int cameraSeed;
+  final int frameSeed;
+  final bool scanFilm;
+  final bool scanWhiteCorrection;
+  final bool scanBlackCorrection;
+  final double scannerBlur;
 
   /// Normalised to the picture, so it carries across files of any size.
   final CropRect? crop;
@@ -156,6 +182,19 @@ class PhotoSettings {
         'flipH': flipH,
         'flipV': flipV,
         'quarterTurns': quarterTurns,
+        'rotationDeg': rotationDeg,
+        'halationBoost': halationBoost,
+        'halationHeadroom': halationHeadroom,
+        'grainSublayers': grainSublayers,
+        'dateEv': dateEv,
+        'dateInsetX': dateInsetX,
+        'dateInsetY': dateInsetY,
+        'cameraSeed': cameraSeed,
+        'frameSeed': frameSeed,
+        'scanFilm': scanFilm,
+        'scanWhiteCorrection': scanWhiteCorrection,
+        'scanBlackCorrection': scanBlackCorrection,
+        'scannerBlur': scannerBlur,
         if (crop != null)
           'crop': {
             'x': crop!.x,
@@ -232,6 +271,19 @@ class PhotoSettings {
       flipH: b('flipH', false),
       flipV: b('flipV', false),
       quarterTurns: i('quarterTurns', 0),
+      rotationDeg: d('rotationDeg', 0),
+      halationBoost: d('halationBoost', 0),
+      halationHeadroom: d('halationHeadroom', 4),
+      grainSublayers: b('grainSublayers', true),
+      dateEv: d('dateEv', 3.5),
+      dateInsetX: d('dateInsetX', 3),
+      dateInsetY: d('dateInsetY', 2.4),
+      cameraSeed: i('cameraSeed', 0),
+      frameSeed: i('frameSeed', 0),
+      scanFilm: b('scanFilm', false),
+      scanWhiteCorrection: b('scanWhiteCorrection', false),
+      scanBlackCorrection: b('scanBlackCorrection', false),
+      scannerBlur: d('scannerBlur', 0),
       crop: cropMap == null
           ? null
           : CropRect(
