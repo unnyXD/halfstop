@@ -149,10 +149,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   /// the pack is re-solved rather than left to drift.
   String _illuminant = 'TH-KG3';
 
-  /// Seeds for the rebate's dye clouds and light leaks: same seed, same
-  /// pattern. 0 lets the engine pick.
-  int _cameraSeed = 0;
-  int _frameSeed = 0;
+  /// Seeds for the rebate's dye clouds, light leaks and frame number: same
+  /// seed, same pattern. The engine numbers a frame `1 + frame_seed % 34`, so
+  /// a zero seed would print "1" on every picture -- these start random and
+  /// are remembered per picture like everything else. "换一张" re-rolls them.
+  int _cameraSeed = math.Random().nextInt(1 << 30);
+  int _frameSeed = math.Random().nextInt(1 << 30);
 
   /// The picture's own orientation. The crop is read in the source's
   /// coordinates, so turning or flipping never moves it.
@@ -1627,8 +1629,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _dateEv = s.dateEv;
       _dateInsetX = s.dateInsetX;
       _dateInsetY = s.dateInsetY;
-      _cameraSeed = s.cameraSeed;
-      _frameSeed = s.frameSeed;
+      // Settings filed before the seeds existed carry 0, which the engine reads
+      // as "print 1"; give those a real seed instead of a constant frame number.
+      _cameraSeed =
+          s.cameraSeed != 0 ? s.cameraSeed : math.Random().nextInt(1 << 30);
+      _frameSeed =
+          s.frameSeed != 0 ? s.frameSeed : math.Random().nextInt(1 << 30);
       _illuminant = s.illuminant;
       _crop = null;
       _overscanOn = s.overscanOn;
