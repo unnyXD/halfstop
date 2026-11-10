@@ -36,6 +36,9 @@ class PhotoSettings {
     this.latitudeShadow = 0,
     this.layer2 = Layer2Params.neutral,
     this.formatId,
+    this.flipH = false,
+    this.flipV = false,
+    this.quarterTurns = 0,
     this.crop,
     this.cropOnWidth,
     this.cropOnHeight,
@@ -87,6 +90,11 @@ class PhotoSettings {
 
   /// `135`, `120_6x6`, … or null for "leave the frame alone".
   final String? formatId;
+
+  /// The picture's own orientation, applied after the crop.
+  final bool flipH;
+  final bool flipV;
+  final int quarterTurns;
 
   /// Normalised to the picture, so it carries across files of any size.
   final CropRect? crop;
@@ -145,6 +153,9 @@ class PhotoSettings {
           'tint': layer2.tint,
         },
         if (formatId != null) 'formatId': formatId,
+        'flipH': flipH,
+        'flipV': flipV,
+        'quarterTurns': quarterTurns,
         if (crop != null)
           'crop': {
             'x': crop!.x,
@@ -218,6 +229,9 @@ class PhotoSettings {
         tint: (layerMap['tint'] as num?)?.toDouble() ?? 0,
       ),
       formatId: json['formatId'] as String?,
+      flipH: b('flipH', false),
+      flipV: b('flipV', false),
+      quarterTurns: i('quarterTurns', 0),
       crop: cropMap == null
           ? null
           : CropRect(

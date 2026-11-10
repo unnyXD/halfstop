@@ -51,7 +51,7 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage> {
+class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   static const int _previewEdge = 1600;
   static const int _fineEdge = 3400;
 
@@ -128,6 +128,12 @@ class _EditorPageState extends State<EditorPage> {
   /// A Wratten filter on the lens ("w8", "w25", …); empty is none. It only
   /// changes black-and-white stocks — colour emulsions carry their own dyes.
   String _cameraFilter = '';
+
+  /// The picture's own orientation. The crop is read in the source's
+  /// coordinates, so turning or flipping never moves it.
+  bool _flipH = false;
+  bool _flipV = false;
+  int _quarterTurns = 0;
 
   /// How far each end of the scene is pulled back onto what the paper can
   /// hold, in stops. 0 turns that side off. The engine solves these into
@@ -232,11 +238,25 @@ class _EditorPageState extends State<EditorPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _boot();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Being killed from the task switcher skips `dispose`, and with it the last
+    // chance to file this picture's settings; going to the background is the
+    // last point the app is guaranteed to see.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _rememberSettings();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _rememberSettings();
     _debounce?.cancel();
     _image?.dispose();
     _sourceImage?.dispose();
@@ -472,6 +492,9 @@ class _EditorPageState extends State<EditorPage> {
   Map<String, Object?> _frameDelta() {
     final crop = _cropBox;
     return {
+      'geometry_flip_h': _flipH,
+      'geometry_flip_v': _flipV,
+      'geometry_quarter_turns': _quarterTurns,
       'geometry_crop_x': crop.x,
       'geometry_crop_y': crop.y,
       'geometry_crop_w': crop.width,
@@ -1183,6 +1206,9 @@ class _EditorPageState extends State<EditorPage> {
       latitudeHighlight: _highlightPull,
       latitudeShadow: _shadowPull,
       layer2: _layer2,
+      flipH: _flipH,
+      flipV: _flipV,
+      quarterTurns: _quarterTurns,
       formatId: _format?.id,
       crop: crop == null
           ? null
@@ -1268,6 +1294,9 @@ class _EditorPageState extends State<EditorPage> {
       _shadowPull = s.latitudeShadow;
       _layer2 = s.layer2;
       _format = format;
+      _flipH = s.flipH;
+      _flipV = s.flipV;
+      _quarterTurns = s.quarterTurns;
       _crop = null;
       _overscanOn = s.overscanOn;
       _overscanMode = s.overscanMode;
@@ -1500,6 +1529,9 @@ class _EditorPageState extends State<EditorPage> {
     halation: _halation,
     glare: _glare,
     strength: _strength,
+    flipH: _flipH,
+    flipV: _flipV,
+    quarterTurns: _quarterTurns,
     lensBlur: _lensBlur,
     dirOn: _dirOn,
     dirAmount: _dirAmount,
@@ -1523,6 +1555,9 @@ class _EditorPageState extends State<EditorPage> {
     _halation = snapshot.halation;
     _glare = snapshot.glare;
     _strength = snapshot.strength;
+    _flipH = snapshot.flipH;
+    _flipV = snapshot.flipV;
+    _quarterTurns = snapshot.quarterTurns;
     _lensBlur = snapshot.lensBlur;
     _dirOn = snapshot.dirOn;
     _dirAmount = snapshot.dirAmount;
@@ -1558,6 +1593,8 @@ class _EditorPageState extends State<EditorPage> {
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
+        // A step can be a flip, a gate or a rebate, not just a slider.
+        ..._frameDelta(),
         'film_stock': _film,
         'print_stock': _paper,
       });
@@ -1587,6 +1624,8 @@ class _EditorPageState extends State<EditorPage> {
       await _worker!.setParams({
         ..._liveDelta(),
         ..._slowDelta(),
+        // A step can be a flip, a gate or a rebate, not just a slider.
+        ..._frameDelta(),
         'film_stock': _film,
         'print_stock': _paper,
       });
@@ -3315,12 +3354,81 @@ class _EditorPageState extends State<EditorPage> {
 
   /// The frame page: gate, rebate, date back. Every control here re-develops
   /// the negative, which is why they commit on change instead of on drag.
+  Widget _orientPill(
+    ThemeData theme,
+    String label,
+    bool active,
+    bool enabled,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _kAccent.withValues(alpha: 0.16) : _kSurfaceHigh,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: active ? _kAccent : _kLine),
+        ),
+        child: Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            fontSize: 11.5,
+            color: enabled
+                ? (active ? _kAccent : _kTextDim)
+                : _kTextDim.withValues(alpha: 0.45),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _resetOrientation() {
+    if (!_flipH && !_flipV && _quarterTurns == 0) return;
+    _pushUndo();
+    setState(() {
+      _flipH = false;
+      _flipV = false;
+      _quarterTurns = 0;
+    });
+    unawaited(_applyFrame(label: '还原方向…'));
+  }
+
   List<Widget> _frameControls(ThemeData theme, bool canRender) {
     final enabled = _hasSession && !_busy;
     final format = _format;
     final crop = _cropBox;
 
     return [
+      _sectionHeader(
+        theme,
+        '画面',
+        onReset: enabled ? _resetOrientation : null,
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+        child: Row(
+          children: [
+            _orientPill(theme, '水平翻转', _flipH, enabled, () {
+              _pushUndo();
+              setState(() => _flipH = !_flipH);
+              unawaited(_applyFrame(label: '翻转…'));
+            }),
+            _orientPill(theme, '垂直翻转', _flipV, enabled, () {
+              _pushUndo();
+              setState(() => _flipV = !_flipV);
+              unawaited(_applyFrame(label: '翻转…'));
+            }),
+            _orientPill(theme, _quarterTurns == 0 ? '旋转 90°' : '旋转 ${_quarterTurns * 90}°',
+                _quarterTurns != 0, enabled, () {
+              _pushUndo();
+              setState(() => _quarterTurns = (_quarterTurns + 1) % 4);
+              unawaited(_applyFrame(label: '旋转…'));
+            }),
+          ],
+        ),
+      ),
       _sectionHeader(theme, '片门', onReset: enabled ? _resetFrame : null),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
@@ -5411,6 +5519,9 @@ class _EditSnapshot {
     required this.halation,
     required this.glare,
     required this.strength,
+    required this.flipH,
+    required this.flipV,
+    required this.quarterTurns,
     required this.lensBlur,
     required this.dirOn,
     required this.dirAmount,
@@ -5437,6 +5548,9 @@ class _EditSnapshot {
   /// The grain page's own controls. They were missing here, so undoing a
   /// scatter or filter change moved the picture back and left the slider
   /// where it was.
+  final bool flipH;
+  final bool flipV;
+  final int quarterTurns;
   final double lensBlur;
   final bool dirOn;
   final double dirAmount;
