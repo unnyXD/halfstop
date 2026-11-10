@@ -229,6 +229,16 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   /// Named looks, for shoots that use one setup for all of it.
   PresetStore? _presets;
 
+  /// Picking pictures on the home screen to export as a set.
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
+
+  /// One export at a time, driven from the home screen.
+  bool _batchRunning = false;
+  int _batchDone = 0;
+  int _batchTotal = 0;
+  bool _batchCancel = false;
+
   /// A crop recalled from a file, held back until the source size is known:
   /// it is only the right shape on a picture of the same size.
   CropRect? _pendingCrop;
@@ -489,8 +499,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     return entry['paired_film'] == _film;
   }
 
-  Map<String, Object?> _frameDelta() {
-    final crop = _cropBox;
+  Map<String, Object?> _frameDelta({CropBox? cropOverride}) {
+    final crop = cropOverride ?? _cropBox;
     return {
       'geometry_flip_h': _flipH,
       'geometry_flip_v': _flipV,
@@ -861,9 +871,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   /// Back to the picker without restarting: the engine keeps its resources,
   /// only the session's picture goes away.
-  void _closeImage() {
-    // Going back is the last chance to file this picture's settings.
-    _rememberSettings();
+  void _closeImage({bool remember = true}) {
+    // Going back is the last chance to file this picture's settings. A batch
+    // leaves a foreign session behind, so it passes `remember: false`.
+    if (remember) _rememberSettings();
     final image = _image;
     final source = _sourceImage;
     setState(() {
@@ -1101,6 +1112,231 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (value == null || !mounted) return;
     setState(() => _dataText = value);
     await _applyFrame(label: '改数据行…');
+  }
+
+  Future<void> _askBatchSize() async {
+    final full = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: _kSurface,
+      showDragHandle: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        Widget row(String title, String caption, bool value) => ListTile(
+              title: Text(
+                title,
+                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13.5),
+              ),
+              subtitle: Text(
+                caption,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 10.5,
+                  color: _kTextDim,
+                ),
+              ),
+              onTap: () => Navigator.of(context).pop(value),
+            );
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              row('快速导出', '长边 2048，最快，适合发出去看', false),
+              row('全尺寸', '每张按原始尺寸渲染，慢，受显存限制会降档', true),
+            ],
+          ),
+        );
+      },
+    );
+    if (full == null || !mounted) return;
+    await _batchExport(fullSize: full);
+  }
+
+  void _toggleSelected(CachedRaw entry) {
+    setState(() {
+      if (!_selected.remove(entry.path)) _selected.add(entry.path);
+      if (_selected.isEmpty) _selecting = false;
+    });
+  }
+
+  Future<void> _showTileMenu(CachedRaw entry) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _kSurface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.checklist_rounded, size: 20),
+              title: const Text('多选导出'),
+              onTap: () => Navigator.of(context).pop('select'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, size: 20),
+              title: const Text('删除这条缓存'),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'delete') {
+      await _deleteCached(entry);
+      return;
+    }
+    setState(() {
+      _selecting = true;
+      _selected
+        ..clear()
+        ..add(entry.path);
+    });
+  }
+
+  /// Renders a set of pictures with what the panel is set to and writes each
+  /// one to the gallery.
+  ///
+  /// The panel's crop belongs to whichever picture was open, so a batch cannot
+  /// reuse it: every picture gets its own centred gate while everything about
+  /// the medium — film, paper, rebate, date, latitude — travels unchanged.
+  Future<void> _batchExport({required bool fullSize}) async {
+    final worker = _worker;
+    final resources = _resourcesDir;
+    if (worker == null || resources == null || _batchRunning) return;
+    final entries = _cached.where((e) => _selected.contains(e.path)).toList();
+    if (entries.isEmpty) return;
+
+    // The open picture's settings are what the batch is made of; file them
+    // before the session is taken over.
+    _rememberSettings();
+    setState(() {
+      _selecting = false;
+      _batchRunning = true;
+      _batchTotal = entries.length;
+      _batchDone = 0;
+      _batchCancel = false;
+      _busy = true;
+      _busyLabel = '批量导出 0 / ${entries.length}';
+    });
+
+    var written = 0;
+    var failed = 0;
+    String? firstFailure;
+    final longEdge = fullSize ? null : 2048;
+    try {
+      for (final entry in entries) {
+        if (_batchCancel) break;
+        try {
+          final Map<String, dynamic> opened;
+          final baseParams = <String, Object?>{
+            'film_stock': _film,
+            'print_stock': _paper,
+            ..._liveDelta(),
+            ..._slowDelta(),
+          };
+          if (entry.isPhoto) {
+            final photo = await decodeToLinearProPhoto(entry.path);
+            opened = await worker.openImage(
+              resourcesDir: resources,
+              pixels: photo.pixels,
+              width: photo.width,
+              height: photo.height,
+              params: baseParams,
+            );
+          } else {
+            opened = await worker.openRaw(
+              resourcesDir: resources,
+              rawPath: entry.path,
+              params: baseParams,
+            );
+          }
+          final input =
+              (opened['input'] as Map?)?.cast<String, dynamic>() ?? const {};
+          final sourceW = (input['source_width'] as num?)?.toInt() ?? 0;
+          final sourceH = (input['source_height'] as num?)?.toInt() ?? 0;
+          final format = _format;
+          final crop = format == null || sourceW <= 0 || sourceH <= 0
+              ? null
+              : centreCropForRatio(_gateRatio, sourceW, sourceH);
+          // A rebate is laid out on a canvas larger than the frame; the same
+          // budget rule as a single export applies, per picture.
+          final edge = math.min(math.max(sourceW, sourceH), 8192);
+          final capped = _overscanEdge(edge);
+          final cappedByRebate =
+              _overscanOn && format != null && capped < edge;
+          await worker.setParams({
+            ..._frameDelta(cropOverride: crop),
+            if (cappedByRebate) 'preview_long_edge': capped,
+            'film_stock': _film,
+            'print_stock': _paper,
+          });
+          if (_highlightPull > 0 || _shadowPull > 0) {
+            await _applyLatitude(quiet: true, render: false);
+          }
+          final frame = (fullSize && !cappedByRebate)
+              ? await worker.render(tier: 'full')
+              : await worker.reprint(tier: 'live');
+          RenderFrame? sourceFrame;
+          if (_strength < 0.999) {
+            sourceFrame =
+                await worker.exportSource(tier: fullSize ? 'full' : 'live');
+          }
+          await encodeAndSave(
+            pixels: frame.pixels,
+            width: frame.width,
+            height: frame.height,
+            fileName: exportFileName(_film),
+            longEdge: longEdge,
+            quality: 92,
+            matrix: _layer2.isNeutral ? null : _layer2.matrix,
+            sourcePath: entry.path,
+            make: input['make'] as String?,
+            model: input['model'] as String?,
+            strength: _strength,
+            sourcePixels: sourceFrame?.pixels,
+            sourceWidth: sourceFrame?.width,
+            sourceHeight: sourceFrame?.height,
+          );
+          written++;
+        } catch (error) {
+          failed++;
+          firstFailure ??= error.toString();
+        }
+        if (!mounted) break;
+        setState(() {
+          _batchDone++;
+          _busyLabel = '批量导出 $_batchDone / $_batchTotal';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _batchRunning = false;
+          _busy = false;
+          _busyLabel = null;
+          _selected.clear();
+        });
+      }
+      // The session now holds the last picture of the batch, not the one the
+      // editor thinks it has: drop back to the picker rather than show a stale
+      // frame under the old parameters.
+      _closeImage(remember: false);
+    }
+
+    if (!mounted) return;
+    final parts = <String>['已导出 $written 张'];
+    if (failed > 0) parts.add('$failed 张失败');
+    if (_batchCancel) parts.add('已取消');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failed > 0 && firstFailure != null
+              ? '${parts.join('，')}。第一个错误：$firstFailure'
+              : parts.join('，'),
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _deleteCached(CachedRaw entry) async {
@@ -2690,22 +2926,133 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             ),
             if (_cached.isNotEmpty) ...[
               const SizedBox(height: 26),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Stack(
+                alignment: Alignment.center,
                 children: [
-                  Container(width: 14, height: 1, color: _kLineStrong),
-                  const SizedBox(width: 10),
-                  Text(
-                    '最近导入',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      letterSpacing: 1.6,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(width: 14, height: 1, color: _kLineStrong),
+                      const SizedBox(width: 10),
+                      Text(
+                        '最近导入',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          letterSpacing: 1.6,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(width: 14, height: 1, color: _kLineStrong),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Container(width: 14, height: 1, color: _kLineStrong),
+                  if (!_selecting && !_batchRunning)
+                    Positioned(
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: _busy
+                            ? null
+                            : () => setState(() {
+                                  _selecting = true;
+                                  _selected.clear();
+                                }),
+                        child: Text(
+                          '选择',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 11,
+                            color: _kAccent,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+              if (_batchRunning) ...[
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                  decoration: BoxDecoration(
+                    color: _kSurfaceHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _kLine),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        '导出中 $_batchDone / $_batchTotal',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 11.5,
+                          color: _kText,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: _batchTotal == 0
+                              ? null
+                              : _batchDone / _batchTotal,
+                          minHeight: 2,
+                          backgroundColor: _kLine,
+                          color: _kAccent,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() => _batchCancel = true),
+                        child: const Text('取消'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ] else if (_selecting) ...[
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+                  decoration: BoxDecoration(
+                    color: _kSurfaceHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _kLine),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        '已选 ${_selected.length} 张',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 11.5,
+                          color: _kText,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          if (_selected.length == _cached.take(9).length) {
+                            _selected.clear();
+                          } else {
+                            _selected
+                              ..clear()
+                              ..addAll(_cached.take(9).map((e) => e.path));
+                          }
+                        }),
+                        child: const Text('全选'),
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _selecting = false;
+                          _selected.clear();
+                        }),
+                        child: const Text('取消'),
+                      ),
+                      FilledButton(
+                        onPressed: _selected.isEmpty ? null : _askBatchSize,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _kAccent,
+                          foregroundColor: const Color(0xFF131211),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        child: const Text('导出'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -3749,9 +4096,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Widget _recentTile(ThemeData theme, CachedRaw entry) {
     final source = entry.isPhoto ? entry.path : (entry.thumb ?? '');
     final ready = source.isNotEmpty && File(source).existsSync();
+    final selected = _selected.contains(entry.path);
     return GestureDetector(
-      onTap: _busy || _booting ? null : () => _openCached(entry),
-      onLongPress: _busy ? null : () => _deleteCached(entry),
+      onTap: _busy || _booting
+          ? null
+          : () => _selecting ? _toggleSelected(entry) : _openCached(entry),
+      onLongPress: _busy || _booting
+          ? null
+          : () => _selecting ? _toggleSelected(entry) : _showTileMenu(entry),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
@@ -3766,6 +4118,39 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               )
             else
               _tilePlaceholder(entry),
+            if (_selecting)
+              Positioned(
+                // Top-left: the RAW tag owns the top-right corner.
+                left: 6,
+                top: 6,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? _kAccent : const Color(0x8A000000),
+                    border: Border.all(
+                      color: selected ? _kAccent : const Color(0xB3FFFFFF),
+                      width: 1.4,
+                    ),
+                  ),
+                  child: selected
+                      ? const Icon(Icons.check_rounded,
+                          size: 15, color: Color(0xFF131211))
+                      : null,
+                ),
+              ),
+            if (_selecting && selected)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _kAccent, width: 2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
             // The name is small and dim on purpose: the pictures are the list.
             Positioned(
               left: 0,

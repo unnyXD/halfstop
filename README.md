@@ -48,6 +48,7 @@ Android 上的胶片模拟应用。光谱计算和渲染都在手机 GPU 上跑�
 - 相册图片：JPEG、PNG、WebP、BMP
 - RAW：ARW、DNG、CR2、CR3、NEF、RAF、ORF 等，走 LibRaw 解码
 - 首页列出最近导入，RAW 的缩略图用相机内嵌的预览，不用先解码
+- 多选批量导出：一套设置套到一组照片上，每张按自己的尺寸居中取景
 - 导出 JPEG，EXIF 带完整的拍摄参数
 
 ## 已知限制
