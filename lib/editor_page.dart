@@ -1460,6 +1460,26 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     unawaited(_ensureThumbnails());
   }
 
+  /// Deletes one import from the strip under the picture.
+  ///
+  /// Deleting the open picture would leave the editor holding a session for a
+  /// file that no longer exists, so that case steps to the neighbouring import
+  /// and only falls back to the picker when the strip is empty.
+  Future<void> _deleteFromStrip(CachedRaw entry) async {
+    final wasOpen = entry.path == _path;
+    final index = _cached.indexWhere((e) => e.path == entry.path);
+    await _deleteCached(entry);
+    if (!mounted || !wasOpen) return;
+    // A refused delete leaves the entry in place; nothing to step to.
+    if (_cached.any((e) => e.path == entry.path)) return;
+    if (_cached.isEmpty) {
+      _closeImage(remember: false);
+      return;
+    }
+    final next = _cached[index.clamp(0, _cached.length - 1)];
+    _openCached(next);
+  }
+
   /// Writes any missing preview for the home grid.
   ///
   /// A RAW already carries a JPEG its camera made; LibRaw hands it over without
@@ -3387,6 +3407,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     unawaited(HapticFeedback.selectionClick());
                     _openCached(entry);
                   },
+            onLongPress:
+                _busy || _booting ? null : () => _deleteFromStrip(entry),
             child: Container(
               width: 46,
               decoration: BoxDecoration(
