@@ -339,6 +339,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         _booting = false;
       });
       unawaited(_ensureThumbnails());
+      // Pay the pair's fixed setup now, while the picker is on screen, so the
+      // first print does not carry it. A failure here costs nothing but the
+      // warm-up itself, so it must not surface.
+      unawaited(
+        worker
+            .warmUp(film: _film, print: _paper)
+            .catchError((Object _) {}),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {

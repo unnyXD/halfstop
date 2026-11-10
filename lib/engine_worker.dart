@@ -185,6 +185,14 @@ class EngineWorker {
     return _frame(await _call('exportSource', {'tier': tier}));
   }
 
+  /// Pays the fixed per-stock-pair setup ahead of the first print.
+  ///
+  /// Idempotent and cheap on a pair that is already warm, so the picker can
+  /// call it for the pair it expects to be used without a second thought.
+  Future<void> warmUp({required String film, required String print}) async {
+    await _call('warmUp', {'film': film, 'print': print});
+  }
+
   /// Measures the scene against this paper and solves a latitude curve.
   ///
   /// Costs a measurement, not a render. The reply's `fit.params_delta` is what
@@ -345,6 +353,11 @@ class _NativeSession {
         Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
         int Function(Pointer<Void>, Pointer<Utf8>,
             Pointer<Pointer<Utf8>>)>('spk_mobile_session_scene_latitude');
+    _warmUp = library.lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>,
+            Pointer<Pointer<Utf8>>),
+        int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>,
+            Pointer<Pointer<Utf8>>)>('spk_mobile_engine_warm_up');
     _openRaw = library.lookupFunction<
         Pointer<Void> Function(
             Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>),
@@ -419,6 +432,8 @@ class _NativeSession {
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _previewStockLut;
   late final Pointer<Utf8> Function(Pointer<Void>) _lutCatalog;
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _sceneLatitude;
+  late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>,
+      Pointer<Pointer<Utf8>>) _warmUp;
   late final Pointer<Void> Function(
       Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Pointer<Utf8>>) _openRaw;
   late final Pointer<Void> Function(Pointer<Void>, Pointer<Float>, int, int,
@@ -461,6 +476,8 @@ class _NativeSession {
         return _handleFrame(_reprint, args, fallbackTier: 'live', stage: 'reprint');
       case 'render':
         return _handleFrame(_render, args, fallbackTier: 'preview', stage: 'render');
+      case 'warmUp':
+        return _handleWarmUp(args);
       case 'sceneLatitude':
         return _handleSceneLatitude(args);
       case 'previewStockLut':
@@ -598,6 +615,28 @@ class _NativeSession {
       }
       return _decodeMap(reply);
     } finally {
+      malloc.free(replySlot);
+    }
+  }
+
+  Map<String, Object?> _handleWarmUp(Map<String, Object?> args) {
+    if (_engine == nullptr) {
+      throw EngineFailure('arguments', 'engine is not open');
+    }
+    final film = (args['film'] as String? ?? '').toNativeUtf8();
+    final print = (args['print'] as String? ?? '').toNativeUtf8();
+    final replySlot = malloc<Pointer<Utf8>>();
+    replySlot.value = nullptr;
+    try {
+      final status = _warmUp(_engine, film, print, replySlot);
+      final reply = _takeReply(replySlot);
+      if (status != 0) {
+        throw _failureFrom(reply, 'warm_up');
+      }
+      return _decodeMap(reply);
+    } finally {
+      malloc.free(film);
+      malloc.free(print);
       malloc.free(replySlot);
     }
   }

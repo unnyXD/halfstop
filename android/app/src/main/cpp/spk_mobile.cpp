@@ -355,6 +355,32 @@ int32_t spk_mobile_engine_capabilities(spk_engine* engine, char** out_json) {
     return SPK_OK;
 }
 
+// Pays the fixed per-stock-pair setup before the user is looking at it. It is
+// idempotent -- warming a pair already warm costs a lookup -- and touches no
+// session, so it is safe to run while the picker is up.
+int32_t spk_mobile_engine_warm_up(spk_engine* engine, const char* film_stock,
+                                  const char* print_stock, char** out_json) {
+    if (out_json != nullptr) *out_json = nullptr;
+    if (engine == nullptr) {
+        fail_reply(out_json, "arguments", "engine is null");
+        return SPK_ERR_INVALID_ARG;
+    }
+    char* reply = nullptr;
+    const spk_status status =
+        spk_warm_up(engine, film_stock, print_stock, &reply);
+    if (status == SPK_OK) {
+        if (out_json != nullptr) {
+            *out_json = reply;
+        } else if (reply != nullptr) {
+            spk_string_free(reply);
+        }
+    } else {
+        if (reply != nullptr) spk_string_free(reply);
+        fail_reply(out_json, "warm_up", spk_last_error(engine));
+    }
+    return static_cast<int32_t>(status);
+}
+
 // Writes the camera's own JPEG preview beside an import, so the home grid can
 // show a tile without paying for a decode. LibRaw exposes it as `unpack_thumb`:
 // the bytes are already a JPEG, so this is a header read plus a file write
