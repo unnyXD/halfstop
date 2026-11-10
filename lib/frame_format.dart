@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show Offset;
 
 /// The film formats the engine's overscan can lay out, and the crop that makes
@@ -194,8 +195,21 @@ class CropBox {
 /// leaves the frame; a factor below 1 simply relaxes back towards the full
 /// frame, which is as far out as real pixels exist.
 CropBox zoomGate(CropBox gate, double factor, Offset focal) {
-  final width = (gate.width / factor).clamp(0.08, 1.0);
-  final height = (gate.height / factor).clamp(0.08, 1.0);
+  var width = gate.width / factor;
+  var height = gate.height / factor;
+  // Scale the pair, never the sides: clamping each axis on its own is what
+  // let a wide gate grow into the frame and lose its shape, and a gate whose
+  // shape is off is one the engine refuses to lay a rebate around.
+  final over = math.max(width, height);
+  if (over > 1) {
+    width /= over;
+    height /= over;
+  }
+  final under = math.max(0.08 / width, 0.08 / height);
+  if (under > 1) {
+    width *= under;
+    height *= under;
+  }
   // Where the focal point sits inside the current window, 0..1.
   final px = gate.width <= 0 ? 0.5 : (focal.dx - gate.centerX) / gate.width + 0.5;
   final py = gate.height <= 0 ? 0.5 : (focal.dy - gate.centerY) / gate.height + 0.5;

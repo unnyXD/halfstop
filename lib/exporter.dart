@@ -9,6 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'engine_bridge.dart';
 import 'layer2.dart';
 
+/// The gallery album exports land in.
+const String kGalleryAlbum = 'Halfstop';
+
 /// Result of a finished export.
 class ExportedPhoto {
   const ExportedPhoto({
@@ -106,7 +109,7 @@ Future<ExportedPhoto> encodeAndSave({
     if (!await Gal.hasAccess(toAlbum: true)) {
       await Gal.requestAccess(toAlbum: true);
     }
-    await Gal.putImage(file.path, album: '半档');
+    await Gal.putImage(file.path, album: kGalleryAlbum);
     inGallery = true;
   } on GalException {
     // Saving to the gallery is the goal, not a precondition: keep the file in

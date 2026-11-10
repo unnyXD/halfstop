@@ -1880,7 +1880,7 @@ class _EditorPageState extends State<EditorPage> {
             ),
             const SizedBox(height: 10),
             Text(
-              photo.inGallery ? '已存入相册 Spektrafilm' : '相册写入失败，文件保存在应用目录',
+              photo.inGallery ? '已存入相册 $kGalleryAlbum' : '相册写入失败，文件保存在应用目录',
               style: const TextStyle(fontSize: 12, color: _kTextDim),
             ),
             if (shrunk) ...[
