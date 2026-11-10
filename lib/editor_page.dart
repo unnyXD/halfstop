@@ -2319,7 +2319,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   ),
                   // A row of the same pictures the picker lists, so a shoot can
                   // be walked through without going back and forth.
-                  if (!_cropping && _cached.length > 1) _buildStrip(theme),
+                  if (!_cropping &&
+                      _image != null &&
+                      _cached.length > 1)
+                    _buildStrip(theme),
                 ],
               ),
             ),
@@ -2905,9 +2908,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 20),
             Text(
-              '不是滤镜，是冲印',
+              '先显影，再印片',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: _kTextDim),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _kTextDim,
+                letterSpacing: 0.6,
+              ),
             ),
             const SizedBox(height: 26),
             Row(
@@ -4162,6 +4168,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final source = entry.isPhoto ? entry.path : (entry.thumb ?? '');
     final ready = source.isNotEmpty && File(source).existsSync();
     final selected = _selected.contains(entry.path);
+    // A picture with settings of its own reads the same as an untouched one in
+    // a RAW thumbnail, so say so: a dot, not a preview.
+    final edited = _photoSettings?[entry.path] != null;
     return GestureDetector(
       onTap: _busy || _booting
           ? null
@@ -4183,6 +4192,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               )
             else
               _tilePlaceholder(entry),
+            if (!_selecting && edited)
+              Positioned(
+                left: 6,
+                top: 6,
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _kAccent,
+                  ),
+                ),
+              ),
             if (_selecting)
               Positioned(
                 // Top-left: the RAW tag owns the top-right corner.
