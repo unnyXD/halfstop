@@ -3971,18 +3971,33 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final format = _format;
     final crop = _cropBox;
 
+    // A rebate lays the frame out on the gate, and the gate's own millimetres
+    // are what the film side converts micrometres with -- `film_format_mm` is
+    // not read at all in that case. Showing the gate's number beats offering a
+    // slider the engine will ignore.
+    final gateWidthMm = format != null && _overscanOn ? format.longEdge : null;
+    final widthMm = gateWidthMm ?? _filmFormatMm;
+
     return [
       _sliderRow(
         theme,
-        label: '胶片宽度',
-        valueLabel: '${_filmFormatMm.toStringAsFixed(0)} mm',
-        value: _filmFormatMm,
+        label: gateWidthMm == null ? '胶片宽度' : '胶片宽度 · 片门',
+        valueLabel: gateWidthMm == null
+            ? '${widthMm.toStringAsFixed(0)} mm'
+            : '${widthMm.toStringAsFixed(1)} mm',
+        value: widthMm,
         min: 4,
         max: 200,
-        enabled: enabled,
+        enabled: enabled && gateWidthMm == null,
         onChangeStart: (_) => _pushUndo(),
         onChanged: (value) => setState(() => _filmFormatMm = value),
         onChangeEnd: (_) => _applyFrame(label: '换胶卷…'),
+      ),
+      _caption(
+        theme,
+        gateWidthMm == null
+            ? '微米单位的量都按它换算：镜头模糊、颗粒、扩散'
+            : '片边开着，用片门的 ${gateWidthMm.toStringAsFixed(1)} mm，这一项不参与',
       ),
       _sectionHeader(
         theme,
@@ -4666,6 +4681,20 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _caption(ThemeData theme, String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 0),
+      child: Text(
+        text,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontSize: 10.5,
+          height: 1.5,
+          color: _kTextDim.withValues(alpha: 0.8),
+        ),
       ),
     );
   }
